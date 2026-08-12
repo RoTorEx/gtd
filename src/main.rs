@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use clap::Parser;
+use colored::Colorize;
+use comfy_table::{Cell, Color, ContentArrangement, Table};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -81,29 +83,86 @@ async fn main() -> Result<()> {
     grouped.sort_by(|a, b| a.0.cmp(&b.0));
 
     let now = Utc::now();
-    let mut first = true;
     for (project_name, mut tasks) in grouped {
-        if !first {
-            println!();
-        }
-        first = false;
-        println!("{}", project_name);
+        println!("\n{}", project_header(&project_name));
 
         tasks.sort_by(|a, b| a.added_at.cmp(&b.added_at));
+
+        let mut table = Table::new();
+        table
+            .set_header(vec!["Age", "Added", "Task"])
+            .set_content_arrangement(ContentArrangement::DynamicFullWidth);
 
         for task in tasks {
             let added = parse_datetime(&task.added_at)?;
             let age = now.signed_duration_since(added);
-            println!(
-                "  {:>8}  {:>16}  {}",
-                format_age(age),
-                added.with_timezone(&Local).format("%Y-%m-%d %H:%M"),
-                task.content
-            );
+            let age_str = format_age(age);
+            let age_color = age_color(age.num_days());
+            let date_str = added
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string();
+            let content = strip_markdown_links(&task.content);
+
+            table.add_row(vec![
+                Cell::new(age_str).fg(age_color),
+                Cell::new(date_str).fg(Color::DarkGrey),
+                Cell::new(content),
+            ]);
         }
+
+        println!("{table}");
     }
 
     Ok(())
+}
+
+fn project_header(name: &str) -> String {
+    format!("{} {}", "▶".yellow(), name.bold().cyan())
+}
+
+fn age_color(days: i64) -> Color {
+    match days {
+        ..7 => Color::Green,
+        7..30 => Color::Yellow,
+        _ => Color::Red,
+    }
+}
+
+fn strip_markdown_links(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '[' {
+            out.push(c);
+            continue;
+        }
+        let mut label = String::new();
+        let mut found_bracket = false;
+        for c2 in chars.by_ref() {
+            if c2 == ']' {
+                found_bracket = true;
+                break;
+            }
+            label.push(c2);
+        }
+        if !found_bracket {
+            out.push('[');
+            out.push_str(&label);
+            continue;
+        }
+        // Skip the URL in parentheses, if present.
+        if chars.peek() == Some(&'(') {
+            chars.next();
+            for c2 in chars.by_ref() {
+                if c2 == ')' {
+                    break;
+                }
+            }
+        }
+        out.push_str(&label);
+    }
+    out
 }
 
 async fn fetch_projects(client: &reqwest::Client, token: &str) -> Result<Vec<Project>> {
