@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use clap::Parser;
 use colored::Colorize;
-use comfy_table::{Cell, Color, ContentArrangement, Table};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -109,50 +108,62 @@ async fn main() -> Result<()> {
                 .push(task);
         }
 
-        let mut sections_sorted: Vec<(String, Vec<Task>)> = by_section
+        let mut sections_sorted: Vec<(String, i64, Vec<Task>)> = by_section
             .into_iter()
             .map(|(section_id, tasks)| {
-                let name = section_id
+                let (name, order) = section_id
                     .as_ref()
                     .and_then(|id| section_names.get(id).cloned())
-                    .map(|(name, _)| name)
-                    .unwrap_or_else(|| "No section".to_string());
-                (name, tasks)
+                    .unwrap_or_else(|| ("No section".to_string(), 0));
+                (name, order, tasks)
             })
             .collect();
-        sections_sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        sections_sorted.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
 
-        for (section_name, mut section_tasks) in sections_sorted {
+        let mut first_section = true;
+        for (section_name, _, mut section_tasks) in sections_sorted {
+            if !first_section {
+                println!();
+            }
+            first_section = false;
+
             if section_name != "No section" {
-                println!("\n  {}", section_header(&section_name));
+                println!("  {}", section_header(&section_name));
             }
 
             section_tasks.sort_by(|a, b| a.added_at.cmp(&b.added_at));
 
-            let mut table = Table::new();
-            table
-                .set_header(vec!["Age", "Added", "Task"])
-                .set_content_arrangement(ContentArrangement::DynamicFullWidth);
+            let rows: Result<Vec<(String, String, String, i64)>> = section_tasks
+                .iter()
+                .map(|task| {
+                    let added = parse_datetime(&task.added_at)?;
+                    let age = now.signed_duration_since(added);
+                    Ok((
+                        format_age(age),
+                        added
+                            .with_timezone(&Local)
+                            .format("%Y-%m-%d %H:%M")
+                            .to_string(),
+                        strip_markdown_links(&task.content),
+                        age.num_days(),
+                    ))
+                })
+                .collect();
+            let rows = rows?;
 
-            for task in section_tasks {
-                let added = parse_datetime(&task.added_at)?;
-                let age = now.signed_duration_since(added);
-                let age_str = format_age(age);
-                let age_color = age_color(age.num_days());
-                let date_str = added
-                    .with_timezone(&Local)
-                    .format("%Y-%m-%d %H:%M")
-                    .to_string();
-                let content = strip_markdown_links(&task.content);
+            let max_age = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+            let max_date = rows.iter().map(|r| r.1.len()).max().unwrap_or(0);
 
-                table.add_row(vec![
-                    Cell::new(age_str).fg(age_color),
-                    Cell::new(date_str).fg(Color::DarkGrey),
-                    Cell::new(content),
-                ]);
+            for (age_str, date_str, content, days) in rows {
+                let age_padded = format!("{:<width$}", age_str, width = max_age);
+                let date_padded = format!("{:<width$}", date_str, width = max_date);
+                let age_colored = match days {
+                    ..7 => age_padded.green(),
+                    7..30 => age_padded.yellow(),
+                    _ => age_padded.red(),
+                };
+                println!("    {}  {}  {}", age_colored, date_padded.dimmed(), content);
             }
-
-            println!("{table}");
         }
     }
 
@@ -164,15 +175,7 @@ fn project_header(name: &str) -> String {
 }
 
 fn section_header(name: &str) -> String {
-    format!("{} {}", "├".dimmed(), name.italic().white())
-}
-
-fn age_color(days: i64) -> Color {
-    match days {
-        ..7 => Color::Green,
-        7..30 => Color::Yellow,
-        _ => Color::Red,
-    }
+    format!("{} {}", "├".yellow(), name.italic().bright_white())
 }
 
 fn strip_markdown_links(text: &str) -> String {
