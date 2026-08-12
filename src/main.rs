@@ -15,6 +15,11 @@ struct Args {
 }
 
 #[derive(Deserialize, Debug)]
+struct PaginatedResponse<T> {
+    results: Vec<T>,
+}
+
+#[derive(Deserialize, Debug)]
 struct Project {
     id: String,
     name: String,
@@ -102,7 +107,7 @@ async fn main() -> Result<()> {
 }
 
 async fn fetch_projects(client: &reqwest::Client, token: &str) -> Result<Vec<Project>> {
-    let projects: Vec<Project> = client
+    let response: PaginatedResponse<Project> = client
         .get(format!("{}/projects", TODOIST_API))
         .bearer_auth(token)
         .send()
@@ -111,11 +116,11 @@ async fn fetch_projects(client: &reqwest::Client, token: &str) -> Result<Vec<Pro
         .json()
         .await
         .context("failed to parse projects response")?;
-    Ok(projects)
+    Ok(response.results)
 }
 
 async fn fetch_tasks(client: &reqwest::Client, token: &str) -> Result<Vec<Task>> {
-    let tasks: Vec<Task> = client
+    let response: PaginatedResponse<Task> = client
         .get(format!("{}/tasks", TODOIST_API))
         .bearer_auth(token)
         .send()
@@ -124,7 +129,7 @@ async fn fetch_tasks(client: &reqwest::Client, token: &str) -> Result<Vec<Task>>
         .json()
         .await
         .context("failed to parse tasks response")?;
-    Ok(tasks)
+    Ok(response.results)
 }
 
 fn parse_datetime(raw: &str) -> Result<DateTime<Utc>> {
