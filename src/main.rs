@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -13,6 +13,22 @@ struct Args {
     /// Show only tasks from this project
     #[arg(short, long)]
     project: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Mark a task as completed
+    Complete { id: String },
+    /// Delete a task
+    Delete {
+        id: String,
+        /// Skip the confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -36,6 +52,7 @@ struct Section {
 
 #[derive(Deserialize, Debug)]
 struct Task {
+    id: String,
     content: String,
     #[serde(alias = "created_at")]
     added_at: String,
@@ -51,10 +68,30 @@ async fn main() -> Result<()> {
 
     let client = reqwest::Client::new();
 
+    match args.command {
+        Some(Command::Complete { id }) => complete_task(&client, &token, &id).await,
+        Some(Command::Delete { id, yes }) => delete_task(&client, &token, &id, yes).await,
+        None => list_tasks(&client, &token, args.project.as_deref()).await,
+    }
+}
+
+struct TaskRow {
+    id: String,
+    age: String,
+    added: String,
+    content: String,
+    days: i64,
+}
+
+async fn list_tasks(
+    client: &reqwest::Client,
+    token: &str,
+    project_filter: Option<&str>,
+) -> Result<()> {
     let (projects, sections, tasks) = tokio::try_join!(
-        fetch_projects(&client, &token),
-        fetch_sections(&client, &token),
-        fetch_tasks(&client, &token),
+        fetch_projects(client, token),
+        fetch_sections(client, token),
+        fetch_tasks(client, token),
     )?;
 
     let project_names: HashMap<String, String> =
@@ -72,7 +109,7 @@ async fn main() -> Result<()> {
             .cloned()
             .unwrap_or_else(|| "Unknown".to_string());
 
-        if let Some(filter) = &args.project
+        if let Some(filter) = project_filter
             && !project_name.eq_ignore_ascii_case(filter)
         {
             continue;
@@ -133,40 +170,84 @@ async fn main() -> Result<()> {
 
             section_tasks.sort_by(|a, b| a.added_at.cmp(&b.added_at));
 
-            let rows: Result<Vec<(String, String, String, i64)>> = section_tasks
+            let rows: Result<Vec<TaskRow>> = section_tasks
                 .iter()
                 .map(|task| {
                     let added = parse_datetime(&task.added_at)?;
                     let age = now.signed_duration_since(added);
-                    Ok((
-                        format_age(age),
-                        added
+                    Ok(TaskRow {
+                        id: task.id.clone(),
+                        age: format_age(age),
+                        added: added
                             .with_timezone(&Local)
                             .format("%Y-%m-%d %H:%M")
                             .to_string(),
-                        strip_markdown_links(&task.content),
-                        age.num_days(),
-                    ))
+                        content: strip_markdown_links(&task.content),
+                        days: age.num_days(),
+                    })
                 })
                 .collect();
             let rows = rows?;
 
-            let max_age = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
-            let max_date = rows.iter().map(|r| r.1.len()).max().unwrap_or(0);
+            let max_id = rows.iter().map(|r| r.id.len()).max().unwrap_or(0);
+            let max_age = rows.iter().map(|r| r.age.len()).max().unwrap_or(0);
+            let max_date = rows.iter().map(|r| r.added.len()).max().unwrap_or(0);
 
-            for (age_str, date_str, content, days) in rows {
-                let age_padded = format!("{:<width$}", age_str, width = max_age);
-                let date_padded = format!("{:<width$}", date_str, width = max_date);
-                let age_colored = match days {
+            for row in rows {
+                let id_padded = format!("{:<width$}", row.id.dimmed(), width = max_id);
+                let age_padded = format!("{:<width$}", row.age, width = max_age);
+                let date_padded = format!("{:<width$}", row.added, width = max_date);
+                let age_colored = match row.days {
                     ..7 => age_padded.green(),
                     7..30 => age_padded.yellow(),
                     _ => age_padded.red(),
                 };
-                println!("    {}  {}  {}", age_colored, date_padded.dimmed(), content);
+                println!(
+                    "    {}  {}  {}  {}",
+                    id_padded,
+                    age_colored,
+                    date_padded.dimmed(),
+                    row.content
+                );
             }
         }
     }
 
+    Ok(())
+}
+
+async fn complete_task(client: &reqwest::Client, token: &str, id: &str) -> Result<()> {
+    client
+        .post(format!("{}/tasks/{}/close", TODOIST_API, id))
+        .bearer_auth(token)
+        .send()
+        .await?
+        .error_for_status()
+        .context("failed to complete task")?;
+    println!("Completed {}", id.green());
+    Ok(())
+}
+
+async fn delete_task(client: &reqwest::Client, token: &str, id: &str, yes: bool) -> Result<()> {
+    if !yes {
+        print!("Delete task {}? [y/N] ", id.yellow());
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            println!("Cancelled");
+            return Ok(());
+        }
+    }
+
+    client
+        .delete(format!("{}/tasks/{}", TODOIST_API, id))
+        .bearer_auth(token)
+        .send()
+        .await?
+        .error_for_status()
+        .context("failed to delete task")?;
+    println!("Deleted {}", id.red());
     Ok(())
 }
 
