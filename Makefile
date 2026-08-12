@@ -1,4 +1,4 @@
-.PHONY: cargo-target-dir install install-local build test lint fmt check run release release-tag release-push release-publish vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
+.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run release release-tag release-push release-publish vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
 
 PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
@@ -22,6 +22,32 @@ install-local: build
 	mv -f "$$tmp" "$(INSTALL_DIR)/$(BIN_NAME)"; \
 	trap - EXIT HUP INT TERM; \
 	printf "Installed %s\n" "$(INSTALL_DIR)/$(BIN_NAME)"
+	@$(MAKE) setup-path
+
+setup-path:
+	@profile=""; \
+	if [ -f "$(HOME)/.zshrc" ]; then profile="$(HOME)/.zshrc"; \
+	elif [ -f "$(HOME)/.bashrc" ]; then profile="$(HOME)/.bashrc"; \
+	else \
+		case "$$(basename "$$SHELL")" in \
+			zsh) profile="$(HOME)/.zshrc" ;; \
+			bash) profile="$(HOME)/.bashrc" ;; \
+		esac; \
+	fi; \
+	if [ -z "$$profile" ]; then \
+		echo "Could not detect shell profile. Add this manually:"; \
+		echo '  export PATH="$(INSTALL_DIR):$$PATH"'; \
+		exit 0; \
+	fi; \
+	block_start="# x-cli-$(PROJECT_NAME)"; \
+	block_end="# /x-cli-$(PROJECT_NAME)"; \
+	if grep -qF "$$block_start" "$$profile" 2>/dev/null; then \
+		echo "PATH block already present in $$profile"; \
+	else \
+		printf '\n%s\nexport PATH="$(INSTALL_DIR):$$PATH"\n%s\n' "$$block_start" "$$block_end" >> "$$profile"; \
+		echo "Added $(INSTALL_DIR) to PATH in $$profile"; \
+	fi; \
+	echo 'Reload your shell or run: export PATH="$(INSTALL_DIR):$$PATH"'
 
 build: cargo-target-dir
 	cargo build --release
