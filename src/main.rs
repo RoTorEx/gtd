@@ -28,11 +28,19 @@ struct Project {
 }
 
 #[derive(Deserialize, Debug)]
+struct Section {
+    id: String,
+    name: String,
+    order: i64,
+}
+
+#[derive(Deserialize, Debug)]
 struct Task {
     content: String,
     #[serde(alias = "created_at")]
     added_at: String,
     project_id: String,
+    section_id: Option<String>,
 }
 
 #[tokio::main]
@@ -43,13 +51,19 @@ async fn main() -> Result<()> {
 
     let client = reqwest::Client::new();
 
-    let (projects, tasks) = tokio::try_join!(
+    let (projects, sections, tasks) = tokio::try_join!(
         fetch_projects(&client, &token),
+        fetch_sections(&client, &token),
         fetch_tasks(&client, &token),
     )?;
 
     let project_names: HashMap<String, String> =
         projects.into_iter().map(|p| (p.id, p.name)).collect();
+
+    let section_names: HashMap<String, (String, i64)> = sections
+        .into_iter()
+        .map(|s| (s.id, (s.name, s.order)))
+        .collect();
 
     let mut by_project: HashMap<String, Vec<Task>> = HashMap::new();
     for task in tasks {
@@ -83,35 +97,62 @@ async fn main() -> Result<()> {
     grouped.sort_by(|a, b| a.0.cmp(&b.0));
 
     let now = Utc::now();
-    for (project_name, mut tasks) in grouped {
+    for (project_name, tasks) in grouped {
         println!("\n{}", project_header(&project_name));
 
-        tasks.sort_by(|a, b| a.added_at.cmp(&b.added_at));
-
-        let mut table = Table::new();
-        table
-            .set_header(vec!["Age", "Added", "Task"])
-            .set_content_arrangement(ContentArrangement::DynamicFullWidth);
-
+        let mut by_section: HashMap<Option<String>, Vec<Task>> = HashMap::new();
         for task in tasks {
-            let added = parse_datetime(&task.added_at)?;
-            let age = now.signed_duration_since(added);
-            let age_str = format_age(age);
-            let age_color = age_color(age.num_days());
-            let date_str = added
-                .with_timezone(&Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string();
-            let content = strip_markdown_links(&task.content);
-
-            table.add_row(vec![
-                Cell::new(age_str).fg(age_color),
-                Cell::new(date_str).fg(Color::DarkGrey),
-                Cell::new(content),
-            ]);
+            by_section
+                .entry(task.section_id.clone())
+                .or_default()
+                .push(task);
         }
 
-        println!("{table}");
+        let mut sections_sorted: Vec<(String, Vec<Task>)> = by_section
+            .into_iter()
+            .map(|(section_id, tasks)| {
+                let name = section_id
+                    .as_ref()
+                    .and_then(|id| section_names.get(id).cloned())
+                    .map(|(name, _)| name)
+                    .unwrap_or_else(|| "No section".to_string());
+                (name, tasks)
+            })
+            .collect();
+        sections_sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (section_name, mut section_tasks) in sections_sorted {
+            if section_name != "No section" {
+                println!("\n  {}", section_header(&section_name));
+            }
+
+            section_tasks.sort_by(|a, b| a.added_at.cmp(&b.added_at));
+
+            let mut table = Table::new();
+            table
+                .set_header(vec!["Age", "Added", "Task"])
+                .set_content_arrangement(ContentArrangement::DynamicFullWidth);
+
+            for task in section_tasks {
+                let added = parse_datetime(&task.added_at)?;
+                let age = now.signed_duration_since(added);
+                let age_str = format_age(age);
+                let age_color = age_color(age.num_days());
+                let date_str = added
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string();
+                let content = strip_markdown_links(&task.content);
+
+                table.add_row(vec![
+                    Cell::new(age_str).fg(age_color),
+                    Cell::new(date_str).fg(Color::DarkGrey),
+                    Cell::new(content),
+                ]);
+            }
+
+            println!("{table}");
+        }
     }
 
     Ok(())
@@ -119,6 +160,10 @@ async fn main() -> Result<()> {
 
 fn project_header(name: &str) -> String {
     format!("{} {}", "▶".yellow(), name.bold().cyan())
+}
+
+fn section_header(name: &str) -> String {
+    format!("{} {}", "├".dimmed(), name.italic().white())
 }
 
 fn age_color(days: i64) -> Color {
@@ -163,6 +208,19 @@ fn strip_markdown_links(text: &str) -> String {
         out.push_str(&label);
     }
     out
+}
+
+async fn fetch_sections(client: &reqwest::Client, token: &str) -> Result<Vec<Section>> {
+    let response: PaginatedResponse<Section> = client
+        .get(format!("{}/sections", TODOIST_API))
+        .bearer_auth(token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("failed to parse sections response")?;
+    Ok(response.results)
 }
 
 async fn fetch_projects(client: &reqwest::Client, token: &str) -> Result<Vec<Project>> {
