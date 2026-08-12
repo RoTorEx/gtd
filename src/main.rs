@@ -31,6 +31,7 @@ struct Project {
 struct Section {
     id: String,
     name: String,
+    #[serde(default)]
     order: i64,
 }
 
