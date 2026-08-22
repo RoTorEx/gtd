@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-22
+
 ### Fixed
 
 - Publish GitHub Release assets through a repository-aware action instead of a
