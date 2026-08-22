@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-22
+
 ### Added
 
 - Add `gtd update` to download the latest Apple Silicon release, verify its
