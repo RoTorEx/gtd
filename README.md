@@ -62,7 +62,14 @@ due date, priority, labels, comments, URL, and ID.
 
 ## Themes
 
-Choose the active interface theme in `~/.config/gtd/config.toml`:
+List the bundled themes and change the active one without opening the TUI:
+
+```bash
+gtd themes
+gtd theme ocean
+```
+
+The active theme is stored in `~/.config/gtd/config.toml`:
 
 ```toml
 theme = "classic"
@@ -79,9 +86,10 @@ theme = "classic"
 Each theme also has its own status separator and notice, error, and confirmation
 symbols; symbol sets are not shared between themes.
 
-Restart `gtd` after changing the value. To keep the config elsewhere, set
-`GTD_CONFIG` to its file path. When `XDG_CONFIG_HOME` is set, the default path
-is `$XDG_CONFIG_HOME/gtd/config.toml`.
+`gtd theme` preserves other config entries and rejects unknown names. To keep
+the config elsewhere, set `GTD_CONFIG` to its file path. When
+`XDG_CONFIG_HOME` is set, the default path is
+`$XDG_CONFIG_HOME/gtd/config.toml`.
 
 ## Development
 
@@ -110,6 +118,7 @@ make vibe-pull
 - `TASK.md` — task queue (agents process and remove completed tasks).
 - `CHANGELOG.md` — release progress.
 - `config.example.toml` — default user configuration and available theme names.
+- `themes/*.toml` — one bundled palette and symbol definition per theme.
 - `.vibe/kernel/*.md` — committed local workflow instructions.
 - `.github/workflows/release.yml` — tagged GitHub Release publication.
 

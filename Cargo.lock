@@ -530,6 +530,7 @@ dependencies = [
  "tar",
  "tokio",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]

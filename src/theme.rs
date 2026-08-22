@@ -1,22 +1,29 @@
 use anyhow::{Context, Result, bail};
 use ratatui::style::Color;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
-pub const THEME_NAMES: [&str; 5] = ["classic", "forest", "sunset", "ocean", "midnight"];
+const PRESETS: [(&str, &str); 5] = [
+    ("classic", include_str!("../themes/classic.toml")),
+    ("forest", include_str!("../themes/forest.toml")),
+    ("sunset", include_str!("../themes/sunset.toml")),
+    ("ocean", include_str!("../themes/ocean.toml")),
+    ("midnight", include_str!("../themes/midnight.toml")),
+];
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Theme {
-    pub name: &'static str,
-    pub tasks_title: &'static str,
-    pub details_title: &'static str,
-    pub project_icon: &'static str,
-    pub section_icon: &'static str,
-    pub task_icon: &'static str,
-    pub help_separator: &'static str,
-    pub notice_title: &'static str,
-    pub error_title: &'static str,
-    pub confirm_title: &'static str,
+    pub name: String,
+    pub tasks_title: String,
+    pub details_title: String,
+    pub project_icon: String,
+    pub section_icon: String,
+    pub task_icon: String,
+    pub help_separator: String,
+    pub notice_title: String,
+    pub error_title: String,
+    pub confirm_title: String,
     pub list_border: Color,
     pub detail_border: Color,
     pub label: Color,
@@ -37,181 +44,70 @@ pub struct Theme {
     pub confirm: Color,
 }
 
-impl Theme {
-    pub fn classic() -> Self {
-        Self {
-            name: "classic",
-            tasks_title: "▣ Tasks",
-            details_title: "▤ Details",
-            project_icon: "▶ ",
-            section_icon: "  ├ ",
-            task_icon: "  · ",
-            help_separator: "•",
-            notice_title: "✓ Notice",
-            error_title: "! Error",
-            confirm_title: "? Confirm",
-            list_border: Color::Blue,
-            detail_border: Color::Magenta,
-            label: Color::Blue,
-            project_icon_color: Color::Yellow,
-            project: Color::Cyan,
-            section_icon_color: Color::Yellow,
-            section: Color::Magenta,
-            task: Color::White,
-            description: Color::Blue,
-            selected_bg: Color::Blue,
-            selected_fg: Color::White,
-            status: Color::Gray,
-            age_fresh: Color::Green,
-            age_aging: Color::Yellow,
-            age_old: Color::Red,
-            info: Color::Green,
-            error: Color::Red,
-            confirm: Color::Red,
-        }
-    }
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    name: String,
+    tasks_title: String,
+    details_title: String,
+    project_icon: String,
+    section_icon: String,
+    task_icon: String,
+    help_separator: String,
+    notice_title: String,
+    error_title: String,
+    confirm_title: String,
+    list_border: String,
+    detail_border: String,
+    label: String,
+    project_icon_color: String,
+    project: String,
+    section_icon_color: String,
+    section: String,
+    task: String,
+    description: String,
+    selected_bg: String,
+    selected_fg: String,
+    status: String,
+    age_fresh: String,
+    age_aging: String,
+    age_old: String,
+    info: String,
+    error: String,
+    confirm: String,
+}
 
-    fn forest() -> Self {
-        Self {
-            name: "forest",
-            tasks_title: "♣ Tasks",
-            details_title: "⌁ Details",
-            project_icon: "◆ ",
-            section_icon: "  └ ",
-            task_icon: "  ∙ ",
-            help_separator: "◇",
-            notice_title: "❧ Notice",
-            error_title: "⚠ Error",
-            confirm_title: "⌘ Confirm",
-            list_border: Color::Green,
-            detail_border: Color::LightGreen,
-            label: Color::LightGreen,
-            project_icon_color: Color::Yellow,
-            project: Color::LightGreen,
-            section_icon_color: Color::Green,
-            section: Color::Yellow,
-            task: Color::White,
-            description: Color::DarkGray,
-            selected_bg: Color::Green,
-            selected_fg: Color::Black,
-            status: Color::LightGreen,
-            age_fresh: Color::LightGreen,
-            age_aging: Color::Yellow,
-            age_old: Color::LightRed,
-            info: Color::LightGreen,
-            error: Color::LightRed,
-            confirm: Color::Yellow,
-        }
-    }
-
-    fn sunset() -> Self {
-        Self {
-            name: "sunset",
-            tasks_title: "☀ Tasks",
-            details_title: "✺ Details",
-            project_icon: "◉ ",
-            section_icon: "  ╰ ",
-            task_icon: "  ◦ ",
-            help_separator: "✦",
-            notice_title: "✹ Notice",
-            error_title: "‼ Error",
-            confirm_title: "✷ Confirm",
-            list_border: Color::LightRed,
-            detail_border: Color::LightMagenta,
-            label: Color::Yellow,
-            project_icon_color: Color::Yellow,
-            project: Color::LightRed,
-            section_icon_color: Color::LightRed,
-            section: Color::LightMagenta,
-            task: Color::White,
-            description: Color::LightRed,
-            selected_bg: Color::LightMagenta,
-            selected_fg: Color::Black,
-            status: Color::Yellow,
-            age_fresh: Color::Cyan,
-            age_aging: Color::Yellow,
-            age_old: Color::LightRed,
-            info: Color::Yellow,
-            error: Color::LightRed,
-            confirm: Color::LightRed,
-        }
-    }
-
-    fn ocean() -> Self {
-        Self {
-            name: "ocean",
-            tasks_title: "≈ Tasks",
-            details_title: "≋ Details",
-            project_icon: "◈ ",
-            section_icon: "  ╭ ",
-            task_icon: "  ○ ",
-            help_separator: "~",
-            notice_title: "≃ Notice",
-            error_title: "⚓ Error",
-            confirm_title: "◌ Confirm",
-            list_border: Color::Cyan,
-            detail_border: Color::Blue,
-            label: Color::LightCyan,
-            project_icon_color: Color::LightBlue,
-            project: Color::LightCyan,
-            section_icon_color: Color::Cyan,
-            section: Color::LightBlue,
-            task: Color::White,
-            description: Color::Cyan,
-            selected_bg: Color::Cyan,
-            selected_fg: Color::Black,
-            status: Color::LightCyan,
-            age_fresh: Color::LightCyan,
-            age_aging: Color::LightBlue,
-            age_old: Color::Magenta,
-            info: Color::LightCyan,
-            error: Color::LightRed,
-            confirm: Color::LightBlue,
-        }
-    }
-
-    fn midnight() -> Self {
-        Self {
-            name: "midnight",
-            tasks_title: "☾ Tasks",
-            details_title: "✧ Details",
-            project_icon: "★ ",
-            section_icon: "  ┆ ",
-            task_icon: "  ⋅ ",
-            help_separator: "⋆",
-            notice_title: "☄ Notice",
-            error_title: "× Error",
-            confirm_title: "☽ Confirm",
-            list_border: Color::DarkGray,
-            detail_border: Color::LightBlue,
-            label: Color::LightMagenta,
-            project_icon_color: Color::LightBlue,
-            project: Color::LightBlue,
-            section_icon_color: Color::DarkGray,
-            section: Color::LightMagenta,
-            task: Color::Gray,
-            description: Color::DarkGray,
-            selected_bg: Color::DarkGray,
-            selected_fg: Color::White,
-            status: Color::Gray,
-            age_fresh: Color::LightBlue,
-            age_aging: Color::LightMagenta,
-            age_old: Color::LightRed,
-            info: Color::LightBlue,
-            error: Color::LightRed,
-            confirm: Color::LightMagenta,
-        }
-    }
-
-    fn named(name: &str) -> Option<Self> {
-        match name {
-            "classic" => Some(Self::classic()),
-            "forest" => Some(Self::forest()),
-            "sunset" => Some(Self::sunset()),
-            "ocean" => Some(Self::ocean()),
-            "midnight" => Some(Self::midnight()),
-            _ => None,
-        }
+impl ThemeFile {
+    fn into_theme(self) -> Result<Theme> {
+        Ok(Theme {
+            name: self.name,
+            tasks_title: self.tasks_title,
+            details_title: self.details_title,
+            project_icon: self.project_icon,
+            section_icon: self.section_icon,
+            task_icon: self.task_icon,
+            help_separator: self.help_separator,
+            notice_title: self.notice_title,
+            error_title: self.error_title,
+            confirm_title: self.confirm_title,
+            list_border: parse_color(&self.list_border)?,
+            detail_border: parse_color(&self.detail_border)?,
+            label: parse_color(&self.label)?,
+            project_icon_color: parse_color(&self.project_icon_color)?,
+            project: parse_color(&self.project)?,
+            section_icon_color: parse_color(&self.section_icon_color)?,
+            section: parse_color(&self.section)?,
+            task: parse_color(&self.task)?,
+            description: parse_color(&self.description)?,
+            selected_bg: parse_color(&self.selected_bg)?,
+            selected_fg: parse_color(&self.selected_fg)?,
+            status: parse_color(&self.status)?,
+            age_fresh: parse_color(&self.age_fresh)?,
+            age_aging: parse_color(&self.age_aging)?,
+            age_old: parse_color(&self.age_old)?,
+            info: parse_color(&self.info)?,
+            error: parse_color(&self.error)?,
+            confirm: parse_color(&self.confirm)?,
+        })
     }
 }
 
@@ -224,33 +120,117 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            theme: Theme::classic().name.to_string(),
+            theme: "classic".to_string(),
         }
     }
 }
 
 pub fn load() -> Result<Theme> {
+    let name = active_name()?;
+    get(&name)
+}
+
+pub fn get(name: &str) -> Result<Theme> {
+    find(name)?.ok_or_else(|| unknown_theme_error(name))
+}
+
+pub fn print_available() -> Result<()> {
+    let active = get(&active_name()?)?.name;
+    println!("Available themes:");
+    for theme in presets()? {
+        let marker = if theme.name == active { "*" } else { " " };
+        println!(
+            "{marker} {:<10} {} {} {}",
+            theme.name,
+            theme.project_icon.trim(),
+            theme.section_icon.trim(),
+            theme.task_icon.trim()
+        );
+    }
+    println!("\n* active");
+    Ok(())
+}
+
+pub fn set_active(name: &str) -> Result<PathBuf> {
+    get(name)?;
+
+    let path = config_path()
+        .context("cannot locate the config file; set GTD_CONFIG or HOME before changing themes")?;
+    let existing = if path.exists() {
+        fs::read_to_string(&path)
+            .with_context(|| format!("failed to read config {}", path.display()))?
+    } else {
+        include_str!("../config.example.toml").to_string()
+    };
+    let updated = update_config(&existing, name)?;
+    write_config(&path, &updated)?;
+    Ok(path)
+}
+
+fn active_name() -> Result<String> {
     let Some(path) = config_path() else {
-        return Ok(Theme::classic());
+        return Ok(Config::default().theme);
     };
     if !path.exists() {
-        return Ok(Theme::classic());
+        return Ok(Config::default().theme);
     }
 
-    let contents = std::fs::read_to_string(&path)
+    let contents = fs::read_to_string(&path)
         .with_context(|| format!("failed to read config {}", path.display()))?;
     let config: Config = toml::from_str(&contents)
         .with_context(|| format!("failed to parse config {}", path.display()))?;
+    Ok(config.theme)
+}
 
-    let Some(theme) = Theme::named(&config.theme) else {
-        bail!(
-            "unknown theme {:?} in {}; choose one of: {}",
-            config.theme,
-            path.display(),
-            THEME_NAMES.join(", ")
-        );
-    };
-    Ok(theme)
+fn presets() -> Result<Vec<Theme>> {
+    PRESETS
+        .iter()
+        .map(|(expected_name, contents)| {
+            let definition: ThemeFile = toml::from_str(contents)
+                .with_context(|| format!("failed to parse bundled theme {expected_name}"))?;
+            if definition.name != *expected_name {
+                bail!(
+                    "bundled theme {expected_name} declares the name {:?}",
+                    definition.name
+                );
+            }
+            definition.into_theme()
+        })
+        .collect()
+}
+
+fn find(name: &str) -> Result<Option<Theme>> {
+    Ok(presets()?.into_iter().find(|theme| theme.name == name))
+}
+
+fn update_config(contents: &str, name: &str) -> Result<String> {
+    let mut document = contents
+        .parse::<toml_edit::DocumentMut>()
+        .context("failed to parse existing config")?;
+    document["theme"] = toml_edit::value(name);
+    Ok(document.to_string())
+}
+
+fn write_config(path: &Path, contents: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create config directory {}", parent.display()))?;
+    let temporary = parent.join(format!(".gtd-config-{}.tmp", std::process::id()));
+
+    let result = (|| -> Result<()> {
+        fs::write(&temporary, contents)
+            .with_context(|| format!("failed to write temporary config {}", temporary.display()))?;
+        fs::rename(&temporary, path)
+            .with_context(|| format!("failed to replace config {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -263,14 +243,51 @@ fn config_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/gtd/config.toml"))
 }
 
+fn parse_color(name: &str) -> Result<Color> {
+    let color = match name {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" => Color::Gray,
+        "dark_gray" => Color::DarkGray,
+        "light_red" => Color::LightRed,
+        "light_green" => Color::LightGreen,
+        "light_yellow" => Color::LightYellow,
+        "light_blue" => Color::LightBlue,
+        "light_magenta" => Color::LightMagenta,
+        "light_cyan" => Color::LightCyan,
+        "white" => Color::White,
+        _ => bail!("unknown theme color {name:?}"),
+    };
+    Ok(color)
+}
+
+fn unknown_theme_error(name: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "unknown theme {name:?}; choose one of: {}",
+        PRESETS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn resolves_all_documented_themes() {
-        for name in THEME_NAMES {
-            assert_eq!(Theme::named(name).unwrap().name, name);
+    fn every_preset_file_parses_and_matches_its_filename() {
+        let themes = presets().unwrap();
+
+        assert_eq!(themes.len(), PRESETS.len());
+        for ((expected, _), theme) in PRESETS.iter().zip(themes) {
+            assert_eq!(theme.name, *expected);
         }
     }
 
@@ -282,11 +299,29 @@ mod tests {
     }
 
     #[test]
+    fn changing_theme_preserves_other_config_and_comments() {
+        let updated = update_config(
+            "# Keep me\nproject = \"Work\"\ntheme = \"classic\"\n",
+            "ocean",
+        )
+        .unwrap();
+
+        assert!(updated.contains("# Keep me"));
+        assert!(updated.contains("project = \"Work\""));
+        assert!(updated.contains("theme = \"ocean\""));
+    }
+
+    #[test]
+    fn rejects_unknown_theme_names() {
+        let error = get("missing").unwrap_err().to_string();
+
+        assert!(error.contains("unknown theme \"missing\""));
+        assert!(error.contains("classic, forest, sunset, ocean, midnight"));
+    }
+
+    #[test]
     fn every_theme_has_a_distinct_palette_and_symbol_set() {
-        let themes: Vec<_> = THEME_NAMES
-            .iter()
-            .map(|name| Theme::named(name).unwrap())
-            .collect();
+        let themes = presets().unwrap();
 
         for (index, theme) in themes.iter().enumerate() {
             for other in &themes[index + 1..] {

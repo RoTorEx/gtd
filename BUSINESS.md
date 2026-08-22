@@ -31,6 +31,9 @@ to the Todoist application.
    a task.
 6. On Apple Silicon macOS, let the user replace the running installation with
    the latest published GitHub Release through `gtd update`.
+7. Let the user list bundled themes with `gtd themes` and atomically select one
+   with `gtd theme <name>` without requiring Todoist credentials or network
+   access.
 
 ## Invariants and boundaries
 
@@ -51,6 +54,8 @@ to the Todoist application.
   the current Todoist web URL from the task ID.
 - Installation creates a default config only when none exists; it must not
   overwrite the user's selected theme.
+- Theme selection accepts only bundled names and preserves unrelated config
+  entries and comments.
 
 ## Decision-bearing constants
 
@@ -69,6 +74,9 @@ to the Todoist application.
   its own palette and symbols for panels, projects, sections, tasks, status,
   notices, errors, and confirmations; pairwise distinction is protected by unit
   tests.
+- Each bundled theme is defined in its own `themes/<name>.toml` file and embedded
+  into the binary, so listing and switching themes does not depend on runtime
+  asset files.
 
 ## Non-goals
 
@@ -82,5 +90,7 @@ to the Todoist application.
 - `src/main.rs` — CLI parsing, Todoist API access, grouping, rendering, and task
   actions.
 - `src/update.rs` — verified Apple Silicon GitHub Release self-update.
+- `src/theme.rs` and `themes/*.toml` — config selection plus bundled palette and
+  symbol definitions.
 - `Makefile` — stable build, verification, installation, and release commands.
 - `.github/workflows/release.yml` — tagged release artifact publication.

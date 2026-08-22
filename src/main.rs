@@ -45,6 +45,15 @@ struct Args {
 enum Command {
     /// Install the latest Apple Silicon macOS release
     Update,
+
+    /// Set the active interface theme
+    Theme {
+        /// Preset theme name
+        name: String,
+    },
+
+    /// List preset interface themes
+    Themes,
 }
 
 #[derive(Deserialize, Debug)]
@@ -336,8 +345,18 @@ impl App {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    if matches!(args.command, Some(Command::Update)) {
-        return update::run().await;
+    match &args.command {
+        Some(Command::Update) => return update::run().await,
+        Some(Command::Theme { name }) => {
+            let path = theme::set_active(name)?;
+            println!("Theme set to {name} in {}", path.display());
+            return Ok(());
+        }
+        Some(Command::Themes) => {
+            theme::print_available()?;
+            return Ok(());
+        }
+        None => {}
     }
 
     let active_theme = if args.plain {
@@ -621,9 +640,9 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
 }
 
 fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
-    let theme = app.theme;
+    let theme = &app.theme;
     let block = Block::default()
-        .title(theme.tasks_title)
+        .title(theme.tasks_title.as_str())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.list_border));
 
@@ -638,7 +657,7 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                 ListEntry::Spacer => Line::default(),
                 ListEntry::ProjectHeader(name) => Line::from(vec![
                     Span::styled(
-                        theme.project_icon,
+                        theme.project_icon.as_str(),
                         Style::default().fg(theme.project_icon_color),
                     ),
                     Span::styled(
@@ -650,7 +669,7 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                 ]),
                 ListEntry::SectionHeader(name) => Line::from(vec![
                     Span::styled(
-                        theme.section_icon,
+                        theme.section_icon.as_str(),
                         Style::default().fg(theme.section_icon_color),
                     ),
                     Span::styled(
@@ -685,7 +704,7 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                     };
 
                     Line::from(vec![
-                        Span::styled(theme.task_icon, Style::default().fg(theme.section)),
+                        Span::styled(theme.task_icon.as_str(), Style::default().fg(theme.section)),
                         Span::styled(format!("{age_padded}  "), Style::default().fg(age_color)),
                         Span::styled(content, Style::default().fg(theme.task)),
                         Span::styled(desc_part, Style::default().fg(theme.description)),
@@ -723,9 +742,9 @@ fn pad_width(text: &str, width: usize) -> String {
 }
 
 fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
-    let theme = app.theme;
+    let theme = &app.theme;
     let block = Block::default()
-        .title(theme.details_title)
+        .title(theme.details_title.as_str())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.detail_border));
 
@@ -835,7 +854,7 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
-    let separator = app.theme.help_separator;
+    let separator = app.theme.help_separator.as_str();
     let help = format!(
         "↑/k ↓/j navigate {separator} o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
     );
@@ -853,8 +872,8 @@ fn draw_toast(frame: &mut ratatui::Frame, app: &App, toast: &Toast, area: Rect) 
         .max(1);
     let popup = centered_rect(width, 5.min(area.height), area);
     let (title, color) = match toast.kind {
-        ToastKind::Info => (app.theme.notice_title, app.theme.info),
-        ToastKind::Error => (app.theme.error_title, app.theme.error),
+        ToastKind::Info => (app.theme.notice_title.as_str(), app.theme.info),
+        ToastKind::Error => (app.theme.error_title.as_str(), app.theme.error),
     };
 
     frame.render_widget(ClearWidget, popup);
@@ -884,7 +903,7 @@ fn draw_confirmation(frame: &mut ratatui::Frame, app: &App, confirm: &ConfirmSta
     frame.render_widget(ClearWidget, popup);
 
     let block = Block::default()
-        .title(app.theme.confirm_title)
+        .title(app.theme.confirm_title.as_str())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.confirm));
 
@@ -1323,6 +1342,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_singular_and_plural_theme_commands() {
+        let set = Args::try_parse_from(["gtd", "theme", "ocean"]).unwrap();
+        let list = Args::try_parse_from(["gtd", "themes"]).unwrap();
+
+        assert!(matches!(
+            set.command,
+            Some(Command::Theme { name }) if name == "ocean"
+        ));
+        assert!(matches!(list.command, Some(Command::Themes)));
+    }
+
+    #[test]
     fn separates_new_projects_and_sections_from_preceding_tasks() {
         let projects = vec![
             Project {
@@ -1362,7 +1393,7 @@ mod tests {
             projects,
             sections,
             vec![alpha_one, alpha_two, beta],
-            Theme::classic(),
+            theme::get("classic").unwrap(),
         );
 
         assert!(matches!(app.entries[0], ListEntry::ProjectHeader(_)));

@@ -9,11 +9,14 @@ Tracks real product and release progress.
 - Add five TUI themes—`classic`, `forest`, `sunset`, `ocean`, and `midnight`—
   with distinct palettes and symbol sets, selected through
   `~/.config/gtd/config.toml`.
+- Add `gtd themes` to list presets and `gtd theme <name>` to atomically change
+  the active theme without requiring Todoist access.
 
 ### Changed
 
 - Create a default `theme = "classic"` config during installation while
   preserving an existing config.
+- Store every bundled theme in its own `themes/<name>.toml` definition.
 
 ## [0.2.5] - 2026-08-22
 
