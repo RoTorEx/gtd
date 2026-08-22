@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-22
+
 ### Added
 
 - Add five TUI themes—`classic`, `forest`, `sunset`, `ocean`, and `midnight`—
