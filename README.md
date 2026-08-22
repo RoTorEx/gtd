@@ -5,9 +5,9 @@ and lets you complete or delete them from the terminal.
 
 ## Installation
 
-Download the archive for your platform from
+On an Apple Silicon Mac, download `gtd-macos-aarch64.tar.gz` from
 [GitHub Releases](https://github.com/RoTorEx/gtd/releases), extract `gtd`, and
-put it somewhere on your `PATH`.
+put it somewhere on your `PATH`. Other platforms can build from source.
 
 To build from source, install a current stable Rust toolchain, clone this
 repository, and run `make install`. The binary is installed at

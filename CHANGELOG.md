@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Changed
+
+- Limit release artifacts to Apple Silicon macOS, matching the machine this
+  personal CLI is used on and avoiding unnecessary GitHub Actions runner usage.
+
 ## [0.2.1] - 2026-08-22
 
 ### Fixed
