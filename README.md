@@ -1,6 +1,18 @@
 # gtd
 
-A plain Rust CLI that lists your active Todoist tasks grouped by project, showing when each task was added and how old it is.
+An interactive Rust CLI that lists your active Todoist tasks, shows their age,
+and lets you complete or delete them from the terminal.
+
+## Installation
+
+Download the archive for your platform from
+[GitHub Releases](https://github.com/RoTorEx/gtd/releases), extract `gtd`, and
+put it somewhere on your `PATH`.
+
+To build from source, install a current stable Rust toolchain, clone this
+repository, and run `make install`. The binary is installed at
+`~/.x-cli-gtd/bin/gtd`, and the installer adds that directory to your shell
+profile's `PATH`.
 
 ## Quickstart
 
@@ -11,57 +23,67 @@ export TODOIST_API_TOKEN="your-token-here"
 # 2. Build and install locally
 make install
 
-# 3. Review your tasks
+# 3. Review your tasks in the interactive TUI
 gtd
 
 # 4. (Optional) Show only one project
 gtd --project "Work"
+
+# 5. (Optional) Print the plain grouped list instead of opening the TUI
+gtd --plain
 ```
 
-Run `make check` to verify formatting, lint, and test without rewriting source
-files. Run `make fmt` explicitly to format.
+Check the running binary with `gtd --version` or the source checkout with
+`make version`.
 
-## Kernel sync (sanity check)
+## Interactive controls
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `k` / `j` | Move selection |
+| `o` | Open selected task in browser |
+| `c` | Complete selected task (with confirmation) |
+| `d` | Delete selected task (with confirmation) |
+| `r` | Refresh the task list |
+| `q` / `Esc` | Quit |
+
+The left pane shows each task's title plus up to 30 characters of its
+description. The right pane shows the full description, project, section, age,
+due date, priority, labels, comments, URL, and ID.
+
+## Development
+
+```bash
+make check
+make version
+```
+
+`make check` verifies formatting, lint, tests, and compilation without rewriting
+source files. Use `make fmt` explicitly to format.
+
+The repository keeps a local copy of its agent workflow kernel. Maintainers can
+refresh it with:
 
 ```bash
 make vibe-kernel-set
 make vibe-pull
 ```
 
-`make vibe-kernel-set` prompts for the parent kernel path and updates `.vibe/KERNEL_SOURCE` (local-only; gitignored).
-
-Confirm these exist after pulling:
-
-- `.vibe/kernel/PRINCIPLES.md`
-- `.vibe/kernel/SETUP.md`
-- `.vibe/kernel/examples/GITHUB_RELEASES.md`
-- `.vibe/kernel/examples/CLI_APPS.md`
-- `.vibe/kernel/examples/DIST_ARTIFACTS.md`
-- `.vibe/kernel/examples/RUST_PROJECTS.md`
-- `.githooks/pre-commit`
-- `TASK.md`
-- `CHANGELOG.md`
-- `AGENTS.md` contains the `VIBE:KERNEL_ROUTING` markers
+`.vibe/KERNEL_SOURCE` contains a machine-local path and is gitignored.
 
 ## Docs map
 
-- Keep the repo root minimal. Prefer putting project docs under `docs/` rather than adding many root markdown files.
 - `AGENTS.md` — agent router.
+- `BUSINESS.md` — product purpose, flows, and boundaries.
 - `TASK.md` — task queue (agents process and remove completed tasks).
 - `CHANGELOG.md` — release progress.
-- `.vibe/kernel/*.md` — local copies of Vibecoding Kernel instructions (do not edit).
-- `.vibe/kernel/SETUP.md` — one-time bootstrap/standardization directive.
-- `.vibe/kernel/examples/GITHUB_RELEASES.md` — GitHub Release CI/CD conventions (read only for release automation tasks).
-- `.vibe/kernel/examples/CLI_APPS.md` — CLI install/update/runtime conventions (read only for CLI app tasks).
-- `.vibe/kernel/examples/DIST_ARTIFACTS.md` — distribution artifact conventions (read only for `dist/`/package output tasks).
-- `.vibe/kernel/examples/RUST_PROJECTS.md` — Rust/Cargo conventions (read only for Rust/Cargo tasks).
-- `.githooks/` — optional git hooks managed by the kernel (lint gates).
-- `docs/architecture/` — design truth (agents choose scope; keep schemas/diagrams/boundaries up to date).
-- `docs/contracts/` — stable contracts.
-- `docs/features/` — accepted feature notes.
-- `docs/ideas/` — raw ideas, not roadmap.
-- `docs/reports/` — reports and audits (read only when relevant).
+- `.vibe/kernel/*.md` — committed local workflow instructions.
+- `.github/workflows/release.yml` — tagged GitHub Release publication.
 
 ## Commands
 
 See `Makefile`.
+
+## License
+
+[MIT](LICENSE)

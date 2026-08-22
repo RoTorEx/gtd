@@ -4,7 +4,19 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Added an interactive terminal UI with task navigation, a detail pane, refresh,
+  browser opening, and confirmations for completing or deleting tasks.
+- Added `--plain` for the original grouped non-interactive task listing.
+- Added `--version` and `make version` for checking the installed CLI version.
+- Added automated GitHub Releases for Linux and macOS on x86_64 and aarch64.
+
 ### Changed
 
+- Show task descriptions, due dates, priorities, labels, comment counts, URLs,
+  and Todoist ordering metadata where relevant.
+- Install the binary under `~/.x-cli-gtd/bin` and keep build output under the
+  CLI's runtime directory.
 - Made `make check` read-only and removed placeholder release targets until the
   project has a real versioned delivery process.

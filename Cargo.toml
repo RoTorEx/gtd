@@ -2,6 +2,9 @@
 name = "gtd"
 version = "0.1.0"
 edition = "2024"
+description = "Interactive terminal reviewer for Todoist tasks"
+license = "MIT"
+repository = "https://github.com/RoTorEx/gtd"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -12,3 +15,6 @@ chrono = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 anyhow = "1"
 colored = "2"
+ratatui = "0.29"
+crossterm = "0.28"
+open = "5"

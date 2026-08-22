@@ -1,11 +1,11 @@
-.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
+.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run version release release-tag release-push vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
 
 PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
-CONSTRUCTION_SIDE := $(HOME)/construction_side
-CARGO_TARGET_DIR := $(CONSTRUCTION_SIDE)/$(PROJECT_NAME)/target
-INSTALL_HOME_KIND ?= x-cli
-INSTALL_DIR ?= $(HOME)/.$(INSTALL_HOME_KIND)-$(PROJECT_NAME)
+X_CLI_HOME := $(HOME)/.x-cli-$(PROJECT_NAME)
+X_CLI_BIN_DIR := $(X_CLI_HOME)/bin
+X_CLI_RUNTIME_DIR := $(X_CLI_HOME)/runtime
+CARGO_TARGET_DIR := $(X_CLI_RUNTIME_DIR)/target
 export CARGO_TARGET_DIR
 
 cargo-target-dir:
@@ -14,14 +14,14 @@ cargo-target-dir:
 install: install-local
 
 install-local: build
-	@mkdir -p "$(INSTALL_DIR)"
-	@tmp="$(INSTALL_DIR)/.$(BIN_NAME).tmp.$$$$"; \
+	@mkdir -p "$(X_CLI_BIN_DIR)"
+	@tmp="$(X_CLI_BIN_DIR)/.$(BIN_NAME).tmp.$$$$"; \
 	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
 	cp "$(CARGO_TARGET_DIR)/release/$(BIN_NAME)" "$$tmp"; \
 	chmod 0755 "$$tmp"; \
-	mv -f "$$tmp" "$(INSTALL_DIR)/$(BIN_NAME)"; \
+	mv -f "$$tmp" "$(X_CLI_BIN_DIR)/$(BIN_NAME)"; \
 	trap - EXIT HUP INT TERM; \
-	printf "Installed %s\n" "$(INSTALL_DIR)/$(BIN_NAME)"
+	printf "Installed %s\n" "$(X_CLI_BIN_DIR)/$(BIN_NAME)"
 	@$(MAKE) setup-path
 
 setup-path:
@@ -36,18 +36,17 @@ setup-path:
 	fi; \
 	if [ -z "$$profile" ]; then \
 		echo "Could not detect shell profile. Add this manually:"; \
-		echo '  export PATH="$(INSTALL_DIR):$$PATH"'; \
+		echo '  export PATH="$(X_CLI_BIN_DIR):$$PATH"'; \
 		exit 0; \
 	fi; \
 	block_start="# x-cli-$(PROJECT_NAME)"; \
 	block_end="# /x-cli-$(PROJECT_NAME)"; \
 	if grep -qF "$$block_start" "$$profile" 2>/dev/null; then \
-		echo "PATH block already present in $$profile"; \
-	else \
-		printf '\n%s\nexport PATH="$(INSTALL_DIR):$$PATH"\n%s\n' "$$block_start" "$$block_end" >> "$$profile"; \
-		echo "Added $(INSTALL_DIR) to PATH in $$profile"; \
+		awk -v start="$$block_start" -v end="$$block_end" '$$0 == start { skip = 1; next } $$0 == end { skip = 0; next } !skip' "$$profile" > "$$profile.gtd.tmp" && mv "$$profile.gtd.tmp" "$$profile"; \
 	fi; \
-	echo 'Reload your shell or run: export PATH="$(INSTALL_DIR):$$PATH"'
+	printf '\n%s\nexport PATH="$(X_CLI_BIN_DIR):$$PATH"\n%s\n' "$$block_start" "$$block_end" >> "$$profile"; \
+	echo "Updated $(X_CLI_BIN_DIR) PATH block in $$profile"; \
+	echo 'Reload your shell or run: export PATH="$(X_CLI_BIN_DIR):$$PATH"'
 
 build: cargo-target-dir
 	cargo build --release
@@ -68,6 +67,32 @@ check: cargo-target-dir
 
 run: cargo-target-dir
 	cargo run
+
+version: cargo-target-dir
+	cargo run --locked -- --version
+
+release:
+	sh scripts/release.sh
+
+release-tag:
+	@set -eu; \
+	branch="$$(git branch --show-current)"; \
+	test "$$branch" = "main" || { echo "ERROR: release tag must be created from main, not $$branch" >&2; exit 1; }; \
+	test -z "$$(git status --porcelain)" || { echo "ERROR: commit or remove local changes before tagging" >&2; exit 1; }; \
+	version="$$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"; \
+	test -n "$$version" || { echo "ERROR: could not read version from Cargo.toml" >&2; exit 1; }; \
+	! git rev-parse --verify "refs/tags/v$$version" >/dev/null 2>&1 || { echo "ERROR: tag v$$version already exists" >&2; exit 1; }; \
+	git tag -a "v$$version" -m "Release $$version"; \
+	echo "Created annotated tag v$$version"
+
+release-push:
+	@set -eu; \
+	branch="$$(git branch --show-current)"; \
+	test "$$branch" = "main" || { echo "ERROR: releases must be pushed from main, not $$branch." >&2; exit 1; }; \
+	version="$$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"; \
+	tag="v$$version"; \
+	git rev-parse -q --verify "refs/tags/$$tag" >/dev/null || { echo "ERROR: missing $$tag. Run make release." >&2; exit 1; }; \
+	git push origin main --follow-tags
 
 vibe-kernel-path:
 	@if [ ! -f ".vibe/KERNEL_SOURCE" ]; then \
