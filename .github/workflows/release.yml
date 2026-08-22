@@ -80,9 +80,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - uses: actions/download-artifact@v7
         with:
           path: release-assets
@@ -90,15 +87,8 @@ jobs:
           merge-multiple: true
 
       - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          files=(release-assets/*)
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-              --verify-tag \
-              --title "$GITHUB_REF_NAME" \
-              --generate-notes
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

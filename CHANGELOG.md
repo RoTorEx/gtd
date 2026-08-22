@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Publish GitHub Release assets through a repository-aware action instead of a
+  local-context-dependent `gh release` shell command.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added
