@@ -8,7 +8,7 @@ use crossterm::terminal::{
 };
 use crossterm::{ExecutableCommand, cursor};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear as ClearWidget, List, ListItem, Paragraph, Wrap};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use std::io::{self, stdout};
 use std::time::{Duration, Instant};
 
+mod theme;
 mod update;
+
+use theme::Theme;
 
 const TODOIST_API: &str = "https://api.todoist.com/api/v1";
 const DESC_PREVIEW_LEN: usize = 30;
@@ -149,6 +152,7 @@ struct App {
     max_age: usize,
     confirmation: Option<ConfirmState>,
     toast: Option<Toast>,
+    theme: Theme,
 }
 
 impl App {
@@ -159,6 +163,7 @@ impl App {
         projects: Vec<Project>,
         sections: Vec<Section>,
         tasks: Vec<Task>,
+        theme: Theme,
     ) -> Self {
         let project_names: HashMap<String, String> =
             projects.into_iter().map(|p| (p.id, p.name)).collect();
@@ -180,6 +185,7 @@ impl App {
             max_age: 0,
             confirmation: None,
             toast: None,
+            theme,
         };
         app.set_tasks(tasks);
         app
@@ -334,6 +340,12 @@ async fn main() -> Result<()> {
         return update::run().await;
     }
 
+    let active_theme = if args.plain {
+        None
+    } else {
+        Some(theme::load()?)
+    };
+
     let token = std::env::var("TODOIST_API_TOKEN")
         .context("TODOIST_API_TOKEN environment variable must be set")?;
 
@@ -348,7 +360,16 @@ async fn main() -> Result<()> {
     if args.plain {
         print_plain_list(&projects, &sections, &tasks, args.project.as_deref())
     } else {
-        run_interactive(client, token, projects, sections, tasks, args.project).await
+        run_interactive(
+            client,
+            token,
+            projects,
+            sections,
+            tasks,
+            args.project,
+            active_theme.expect("interactive mode always loads a theme"),
+        )
+        .await
     }
 }
 
@@ -359,6 +380,7 @@ async fn run_interactive(
     sections: Vec<Section>,
     tasks: Vec<Task>,
     project_filter: Option<String>,
+    theme: Theme,
 ) -> Result<()> {
     let mut app = App::new(
         client.clone(),
@@ -367,6 +389,7 @@ async fn run_interactive(
         projects,
         sections,
         tasks,
+        theme,
     );
 
     enable_raw_mode()?;
@@ -591,17 +614,18 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
     draw_status_bar(frame, app, main_chunks[1]);
 
     if let Some(confirm) = &app.confirmation {
-        draw_confirmation(frame, confirm, area);
+        draw_confirmation(frame, app, confirm, area);
     } else if let Some(toast) = &app.toast {
-        draw_toast(frame, toast, area);
+        draw_toast(frame, app, toast, area);
     }
 }
 
 fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = app.theme;
     let block = Block::default()
-        .title("Tasks")
+        .title(theme.tasks_title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue));
+        .border_style(Style::default().fg(theme.list_border));
 
     let now = Utc::now();
     let selected_entry_idx = app.selectable.get(app.selected).copied();
@@ -613,20 +637,26 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             let line = match entry {
                 ListEntry::Spacer => Line::default(),
                 ListEntry::ProjectHeader(name) => Line::from(vec![
-                    Span::styled("▶ ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        theme.project_icon,
+                        Style::default().fg(theme.project_icon_color),
+                    ),
                     Span::styled(
                         name.clone(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme.project)
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]),
                 ListEntry::SectionHeader(name) => Line::from(vec![
-                    Span::styled("  ├ ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        theme.section_icon,
+                        Style::default().fg(theme.section_icon_color),
+                    ),
                     Span::styled(
                         name.clone(),
                         Style::default()
-                            .fg(Color::Magenta)
+                            .fg(theme.section)
                             .add_modifier(Modifier::ITALIC),
                     ),
                 ]),
@@ -649,16 +679,16 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                     let age_padded = pad_width(&age, app.max_age);
 
                     let age_color = match days {
-                        ..7 => Color::Green,
-                        7..30 => Color::Yellow,
-                        _ => Color::Red,
+                        ..7 => theme.age_fresh,
+                        7..30 => theme.age_aging,
+                        _ => theme.age_old,
                     };
 
                     Line::from(vec![
-                        Span::styled("    ", Style::default()),
+                        Span::styled(theme.task_icon, Style::default().fg(theme.section)),
                         Span::styled(format!("{age_padded}  "), Style::default().fg(age_color)),
-                        Span::styled(content, Style::default().fg(Color::White)),
-                        Span::styled(desc_part, Style::default().fg(Color::Blue)),
+                        Span::styled(content, Style::default().fg(theme.task)),
+                        Span::styled(desc_part, Style::default().fg(theme.description)),
                     ])
                 }
             };
@@ -672,8 +702,8 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         .highlight_symbol("")
         .highlight_style(
             Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
+                .bg(theme.selected_bg)
+                .fg(theme.selected_fg)
                 .add_modifier(Modifier::BOLD),
         )
         .scroll_padding(3);
@@ -693,10 +723,11 @@ fn pad_width(text: &str, width: usize) -> String {
 }
 
 fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = app.theme;
     let block = Block::default()
-        .title("Details")
+        .title(theme.details_title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta));
+        .border_style(Style::default().fg(theme.detail_border));
 
     let text = if let Some(item) = app.selected_task() {
         let task = &item.task;
@@ -713,7 +744,7 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("ID: ", Style::default().fg(Color::Blue)),
+                Span::styled("ID: ", Style::default().fg(theme.label)),
                 Span::raw(&task.id),
             ]),
             Line::default(),
@@ -721,7 +752,7 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                 Span::styled(
                     "Title: ",
                     Style::default()
-                        .fg(Color::Blue)
+                        .fg(theme.label)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(strip_markdown_links(&task.content)),
@@ -733,7 +764,7 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![Span::styled(
                 "Description:\n",
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(theme.label)
                     .add_modifier(Modifier::BOLD),
             )]));
             for paragraph in task.description.lines() {
@@ -743,15 +774,15 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         }
 
         lines.push(Line::from(vec![
-            Span::styled("Project: ", Style::default().fg(Color::Blue)),
+            Span::styled("Project: ", Style::default().fg(theme.label)),
             Span::raw(&item.project_name),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Section: ", Style::default().fg(Color::Blue)),
+            Span::styled("Section: ", Style::default().fg(theme.label)),
             Span::raw(&item.section_name),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Added: ", Style::default().fg(Color::Blue)),
+            Span::styled("Added: ", Style::default().fg(theme.label)),
             Span::raw(format!("{added} ({age})")),
         ]));
 
@@ -763,30 +794,30 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                 .unwrap_or_else(|| due.string.clone());
             let recurring = if due.is_recurring { " (recurring)" } else { "" };
             lines.push(Line::from(vec![
-                Span::styled("Due: ", Style::default().fg(Color::Blue)),
+                Span::styled("Due: ", Style::default().fg(theme.label)),
                 Span::raw(format!("{due_str}{recurring}")),
             ]));
         }
 
         let priority_label = 5 - task.priority.clamp(1, 4);
         lines.push(Line::from(vec![
-            Span::styled("Priority: ", Style::default().fg(Color::Blue)),
+            Span::styled("Priority: ", Style::default().fg(theme.label)),
             Span::raw(format!("p{priority_label}")),
         ]));
 
         if !task.labels.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Labels: ", Style::default().fg(Color::Blue)),
+                Span::styled("Labels: ", Style::default().fg(theme.label)),
                 Span::raw(task.labels.join(", ")),
             ]));
         }
 
         lines.push(Line::from(vec![
-            Span::styled("Comments: ", Style::default().fg(Color::Blue)),
+            Span::styled("Comments: ", Style::default().fg(theme.label)),
             Span::raw(task.comment_count.to_string()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("URL: ", Style::default().fg(Color::Blue)),
+            Span::styled("URL: ", Style::default().fg(theme.label)),
             Span::raw(task_browser_url(task)),
         ]));
 
@@ -803,24 +834,27 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn draw_status_bar(frame: &mut ratatui::Frame, _app: &App, area: Rect) {
-    let help = "↑/k ↓/j navigate • o open • c complete • d delete • r refresh • q quit";
+fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let separator = app.theme.help_separator;
+    let help = format!(
+        "↑/k ↓/j navigate {separator} o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
+    );
     let help_widget = Paragraph::new(help)
-        .style(Style::default().fg(Color::Gray))
+        .style(Style::default().fg(app.theme.status))
         .alignment(Alignment::Left);
 
     frame.render_widget(help_widget, area);
 }
 
-fn draw_toast(frame: &mut ratatui::Frame, toast: &Toast, area: Rect) {
+fn draw_toast(frame: &mut ratatui::Frame, app: &App, toast: &Toast, area: Rect) {
     let available_width = area.width.saturating_sub(4);
     let width = (toast.message.chars().count() as u16 + 8)
         .min(available_width)
         .max(1);
     let popup = centered_rect(width, 5.min(area.height), area);
     let (title, color) = match toast.kind {
-        ToastKind::Info => ("Notice", Color::Green),
-        ToastKind::Error => ("Error", Color::Red),
+        ToastKind::Info => ("Notice", app.theme.info),
+        ToastKind::Error => ("Error", app.theme.error),
     };
 
     frame.render_widget(ClearWidget, popup);
@@ -840,7 +874,7 @@ fn draw_toast(frame: &mut ratatui::Frame, toast: &Toast, area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
-fn draw_confirmation(frame: &mut ratatui::Frame, confirm: &ConfirmState, area: Rect) {
+fn draw_confirmation(frame: &mut ratatui::Frame, app: &App, confirm: &ConfirmState, area: Rect) {
     let width = (confirm.message.len() as u16 + 8)
         .min(area.width.saturating_sub(4))
         .max(40);
@@ -852,7 +886,7 @@ fn draw_confirmation(frame: &mut ratatui::Frame, confirm: &ConfirmState, area: R
     let block = Block::default()
         .title("Confirm")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(app.theme.confirm));
 
     let text = Text::from(vec![
         Line::raw(""),
@@ -1328,6 +1362,7 @@ mod tests {
             projects,
             sections,
             vec![alpha_one, alpha_two, beta],
+            Theme::classic(),
         );
 
         assert!(matches!(app.entries[0], ListEntry::ProjectHeader(_)));

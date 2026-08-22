@@ -17,6 +17,8 @@ to the Todoist application.
 - Task age is the elapsed time since Todoist's creation timestamp.
 - The interactive view is the default experience; `--plain` provides a
   non-interactive grouped listing.
+- A theme controls the TUI palette and its project, section, task, pane, and
+  status symbols without changing task behavior.
 
 ## Main flows
 
@@ -47,6 +49,8 @@ to the Todoist application.
   current executable.
 - Opening a task uses the API-provided URL when available and otherwise builds
   the current Todoist web URL from the task ID.
+- Installation creates a default config only when none exists; it must not
+  overwrite the user's selected theme.
 
 ## Decision-bearing constants
 
@@ -60,6 +64,9 @@ to the Todoist application.
   visible without permanently taking space from the task list or status bar.
 - The task list leaves a blank row before a project or section that follows
   tasks, so group boundaries remain visually distinct.
+- The supported theme names are `classic`, `forest`, and `sunset`. `classic`
+  preserves the original interface and is the default for compatibility;
+  theme resolution and visual distinction are protected by unit tests.
 
 ## Non-goals
 

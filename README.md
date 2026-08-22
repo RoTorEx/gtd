@@ -14,6 +14,10 @@ repository, and run `make install`. The binary is installed at
 `~/.x-cli-gtd/bin/gtd`, and the installer adds that directory to your shell
 profile's `PATH`.
 
+The installer also creates `~/.config/gtd/config.toml` when it does not exist
+(or `$XDG_CONFIG_HOME/gtd/config.toml` when that variable is set). Existing
+configuration is preserved on later installs.
+
 ## Quickstart
 
 ```bash
@@ -56,6 +60,24 @@ The left pane shows each task's title plus up to 30 characters of its
 description. The right pane shows the full description, project, section, age,
 due date, priority, labels, comments, URL, and ID.
 
+## Themes
+
+Choose the active interface theme in `~/.config/gtd/config.toml`:
+
+```toml
+theme = "classic"
+```
+
+| Theme | Palette and interface symbols |
+|-------|-------------------------------|
+| `classic` | The original blue, cyan, and magenta palette with `▶` project and `├` section markers |
+| `forest` | Green and yellow palette with `◆` project, `└` section, and `•` task markers |
+| `sunset` | Red, magenta, and yellow palette with `◉` project, `╰` section, and `◦` task markers |
+
+Restart `gtd` after changing the value. To keep the config elsewhere, set
+`GTD_CONFIG` to its file path. When `XDG_CONFIG_HOME` is set, the default path
+is `$XDG_CONFIG_HOME/gtd/config.toml`.
+
 ## Development
 
 ```bash
@@ -82,6 +104,7 @@ make vibe-pull
 - `BUSINESS.md` — product purpose, flows, and boundaries.
 - `TASK.md` — task queue (agents process and remove completed tasks).
 - `CHANGELOG.md` — release progress.
+- `config.example.toml` — default user configuration and available theme names.
 - `.vibe/kernel/*.md` — committed local workflow instructions.
 - `.github/workflows/release.yml` — tagged GitHub Release publication.
 

@@ -1,9 +1,11 @@
-.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run version release release-tag release-push vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
+.PHONY: cargo-target-dir install install-local setup-config setup-path build test lint fmt check run version release release-tag release-push vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
 
 PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
 X_CLI_HOME := $(HOME)/.x-cli-$(PROJECT_NAME)
 X_CLI_BIN_DIR := $(X_CLI_HOME)/bin
+GTD_CONFIG_DIR := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/gtd
+GTD_CONFIG_FILE := $(GTD_CONFIG_DIR)/config.toml
 CONSTRUCTION_SIDE := $(HOME)/construction_side
 CARGO_TARGET_DIR := $(CONSTRUCTION_SIDE)/$(PROJECT_NAME)/target
 export CARGO_TARGET_DIR
@@ -13,7 +15,7 @@ cargo-target-dir:
 
 install: install-local
 
-install-local: build
+install-local: build setup-config
 	@mkdir -p "$(X_CLI_BIN_DIR)"
 	@tmp="$(X_CLI_BIN_DIR)/.$(BIN_NAME).tmp.$$$$"; \
 	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
@@ -23,6 +25,15 @@ install-local: build
 	trap - EXIT HUP INT TERM; \
 	printf "Installed %s\n" "$(X_CLI_BIN_DIR)/$(BIN_NAME)"
 	@$(MAKE) setup-path
+
+setup-config:
+	@mkdir -p "$(GTD_CONFIG_DIR)"
+	@if [ ! -f "$(GTD_CONFIG_FILE)" ]; then \
+		cp config.example.toml "$(GTD_CONFIG_FILE)"; \
+		printf "Created %s with the classic theme\n" "$(GTD_CONFIG_FILE)"; \
+	else \
+		printf "Preserved existing %s\n" "$(GTD_CONFIG_FILE)"; \
+	fi
 
 setup-path:
 	@profile=""; \

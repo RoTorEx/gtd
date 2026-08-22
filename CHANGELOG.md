@@ -4,6 +4,16 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Add `classic`, `forest`, and `sunset` TUI themes with distinct palettes and
+  interface symbols, selected through `~/.config/gtd/config.toml`.
+
+### Changed
+
+- Create a default `theme = "classic"` config during installation while
+  preserving an existing config.
+
 ## [0.2.5] - 2026-08-22
 
 ### Fixed
