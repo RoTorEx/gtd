@@ -4,8 +4,8 @@ PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
 X_CLI_HOME := $(HOME)/.x-cli-$(PROJECT_NAME)
 X_CLI_BIN_DIR := $(X_CLI_HOME)/bin
-X_CLI_RUNTIME_DIR := $(X_CLI_HOME)/runtime
-CARGO_TARGET_DIR := $(X_CLI_RUNTIME_DIR)/target
+CONSTRUCTION_SIDE := $(HOME)/construction_side
+CARGO_TARGET_DIR := $(CONSTRUCTION_SIDE)/$(PROJECT_NAME)/target
 export CARGO_TARGET_DIR
 
 cargo-target-dir:
