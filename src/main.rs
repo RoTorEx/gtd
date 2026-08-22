@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, stdout};
 use std::time::{Duration, Instant};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod theme;
 mod update;
@@ -305,13 +306,7 @@ impl App {
         if self.selectable.is_empty() {
             return;
         }
-        let len = self.selectable.len();
-        let new = if delta < 0 {
-            (self.selected + len - delta.unsigned_abs()) % len
-        } else {
-            (self.selected + delta.unsigned_abs()) % len
-        };
-        self.selected = new;
+        self.selected = bounded_selection(self.selected, self.selectable.len(), delta);
     }
 
     fn show_info(&mut self, message: impl Into<String>) {
@@ -338,6 +333,17 @@ impl App {
         {
             self.toast = None;
         }
+    }
+}
+
+fn bounded_selection(current: usize, len: usize, delta: isize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if delta < 0 {
+        current.saturating_sub(delta.unsigned_abs())
+    } else {
+        current.saturating_add(delta.unsigned_abs()).min(len - 1)
     }
 }
 
@@ -648,11 +654,6 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
-        .split(inner);
-
     let now = Utc::now();
     let selected_entry_idx = app.selectable.get(app.selected).copied();
 
@@ -668,7 +669,12 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                         Style::default().fg(theme.project_icon_color),
                     ),
                     Span::styled(
-                        name.clone(),
+                        truncate_display_width(
+                            name,
+                            inner.width as usize
+                                - UnicodeWidthStr::width(theme.project_icon.as_str())
+                                    .min(inner.width as usize),
+                        ),
                         Style::default()
                             .fg(theme.project)
                             .add_modifier(Modifier::BOLD),
@@ -680,7 +686,12 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                         Style::default().fg(theme.section_icon_color),
                     ),
                     Span::styled(
-                        name.clone(),
+                        truncate_display_width(
+                            name,
+                            inner.width as usize
+                                - UnicodeWidthStr::width(theme.section_icon.as_str())
+                                    .min(inner.width as usize),
+                        ),
                         Style::default()
                             .fg(theme.section)
                             .add_modifier(Modifier::ITALIC),
@@ -735,44 +746,163 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(selected_entry_idx);
+    frame.render_stateful_widget(list.clone(), inner, &mut list_state);
+
+    let pinned = pinned_group_context(&app.entries, list_state.offset(), inner.height as usize);
+    if pinned.is_none() {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+    frame.render_widget(ClearWidget, inner);
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(selected_entry_idx);
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
-    let context = visible_group_context(&app.entries, list_state.offset())
-        .map(|(project, section)| {
+    if let Some(pinned) =
+        pinned_group_context(&app.entries, list_state.offset(), chunks[1].height as usize)
+    {
+        frame.render_widget(
+            Paragraph::new(pinned_context_line(theme, pinned, chunks[0].width as usize)),
+            chunks[0],
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PinnedContext<'a> {
+    project: Option<&'a str>,
+    section: Option<&'a str>,
+}
+
+fn pinned_group_context(
+    entries: &[ListEntry],
+    offset: usize,
+    visible_height: usize,
+) -> Option<PinnedContext<'_>> {
+    let visible_end = offset.saturating_add(visible_height).min(entries.len());
+    let (task_index, item) = entries
+        .iter()
+        .enumerate()
+        .take(visible_end)
+        .skip(offset)
+        .find_map(|(index, entry)| match entry {
+            ListEntry::Task(item) => Some((index, item.as_ref())),
+            _ => None,
+        })?;
+    let preceding_visible = &entries[offset..task_index];
+    let project_visible = preceding_visible
+        .iter()
+        .any(|entry| matches!(entry, ListEntry::ProjectHeader(name) if name == &item.project_name));
+    let section_visible = item.section_name == "No section"
+        || preceding_visible.iter().any(
+            |entry| matches!(entry, ListEntry::SectionHeader(name) if name == &item.section_name),
+        );
+
+    let context = PinnedContext {
+        project: (!project_visible).then_some(item.project_name.as_str()),
+        section: (!section_visible).then_some(item.section_name.as_str()),
+    };
+    (context.project.is_some() || context.section.is_some()).then_some(context)
+}
+
+fn pinned_context_line<'a>(theme: &'a Theme, context: PinnedContext<'a>, width: usize) -> Line<'a> {
+    match (context.project, context.section) {
+        (Some(project), Some(section)) => {
+            let project_icon_width = UnicodeWidthStr::width(theme.project_icon.as_str());
+            let section_icon = theme.section_icon.trim();
+            let fixed_width = project_icon_width + 2 + UnicodeWidthStr::width(section_icon) + 1;
+            let names_width = width.saturating_sub(fixed_width);
+            let mut project_width = UnicodeWidthStr::width(project).min(names_width / 2);
+            let mut section_width = names_width.saturating_sub(project_width);
+            if UnicodeWidthStr::width(section) < section_width {
+                project_width += section_width - UnicodeWidthStr::width(section);
+                section_width = UnicodeWidthStr::width(section);
+            }
+
             Line::from(vec![
                 Span::styled(
                     theme.project_icon.as_str(),
                     Style::default().fg(theme.project_icon_color),
                 ),
                 Span::styled(
-                    project,
+                    truncate_display_width(project, project_width),
                     Style::default()
                         .fg(theme.project)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("  ", Style::default()),
+                Span::raw("  "),
+                Span::styled(section_icon, Style::default().fg(theme.section_icon_color)),
+                Span::raw(" "),
                 Span::styled(
-                    theme.section_icon.trim(),
-                    Style::default().fg(theme.section_icon_color),
-                ),
-                Span::styled(" ", Style::default()),
-                Span::styled(
-                    section,
+                    truncate_display_width(section, section_width),
                     Style::default()
                         .fg(theme.section)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ])
-        })
-        .unwrap_or_default();
-    frame.render_widget(Paragraph::new(context), chunks[0]);
+        }
+        (Some(project), None) => {
+            let available =
+                width.saturating_sub(UnicodeWidthStr::width(theme.project_icon.as_str()));
+            Line::from(vec![
+                Span::styled(
+                    theme.project_icon.as_str(),
+                    Style::default().fg(theme.project_icon_color),
+                ),
+                Span::styled(
+                    truncate_display_width(project, available),
+                    Style::default()
+                        .fg(theme.project)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        }
+        (None, Some(section)) => {
+            let icon = theme.section_icon.trim();
+            let available = width
+                .saturating_sub(UnicodeWidthStr::width(icon))
+                .saturating_sub(1);
+            Line::from(vec![
+                Span::styled(icon, Style::default().fg(theme.section_icon_color)),
+                Span::raw(" "),
+                Span::styled(
+                    truncate_display_width(section, available),
+                    Style::default()
+                        .fg(theme.section)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ])
+        }
+        (None, None) => Line::default(),
+    }
 }
 
-fn visible_group_context(entries: &[ListEntry], offset: usize) -> Option<(&str, &str)> {
-    entries.iter().skip(offset).find_map(|entry| match entry {
-        ListEntry::Task(item) => Some((item.project_name.as_str(), item.section_name.as_str())),
-        _ => None,
-    })
+fn truncate_display_width(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    if max_width <= 3 {
+        return ".".repeat(max_width);
+    }
+
+    let content_width = max_width - 3;
+    let mut used = 0;
+    let mut truncated = String::new();
+    for character in text.chars() {
+        let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
+        if used + character_width > content_width {
+            break;
+        }
+        truncated.push(character);
+        used += character_width;
+    }
+    truncated.push_str("...");
+    truncated
 }
 
 fn pad_width(text: &str, width: usize) -> String {
@@ -1450,7 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_group_context_for_tasks_scrolled_past_their_headers() {
+    fn pins_only_group_headers_that_have_scrolled_away() {
         let item = TaskItem {
             task: test_task("1", ""),
             project_name: "Work".to_string(),
@@ -1463,10 +1593,37 @@ mod tests {
             ListEntry::Task(Box::new(item)),
         ];
 
+        assert_eq!(pinned_group_context(&entries, 0, 3), None);
         assert_eq!(
-            visible_group_context(&entries, 2),
-            Some(("Work", "Latenode"))
+            pinned_group_context(&entries, 1, 2),
+            Some(PinnedContext {
+                project: Some("Work"),
+                section: None,
+            })
         );
+        assert_eq!(
+            pinned_group_context(&entries, 2, 1),
+            Some(PinnedContext {
+                project: Some("Work"),
+                section: Some("Latenode"),
+            })
+        );
+    }
+
+    #[test]
+    fn selection_stops_at_first_and_last_task() {
+        assert_eq!(bounded_selection(0, 5, -1), 0);
+        assert_eq!(bounded_selection(4, 5, 1), 4);
+        assert_eq!(bounded_selection(2, 5, -10), 0);
+        assert_eq!(bounded_selection(2, 5, 10), 4);
+    }
+
+    #[test]
+    fn truncates_long_group_names_to_the_available_display_width() {
+        let truncated = truncate_display_width("Try it: Capture → Clarify → Complete", 20);
+
+        assert_eq!(UnicodeWidthStr::width(truncated.as_str()), 20);
+        assert!(truncated.ends_with("..."));
     }
 
     fn test_task(id: &str, url: &str) -> Task {

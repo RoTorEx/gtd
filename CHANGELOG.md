@@ -4,6 +4,13 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop task navigation at the first and last items instead of wrapping around.
+- Pin project and section context only after their original headers scroll away,
+  avoiding duplicate group labels.
+- Truncate long project and section names with `...` at the task pane boundary.
+
 ## [0.2.7] - 2026-08-22
 
 ### Changed

@@ -69,9 +69,12 @@ to the Todoist application.
   visible without permanently taking space from the task list or status bar.
 - The task list leaves a blank row before a project or section that follows
   tasks, so group boundaries remain visually distinct.
-- The task list keeps the project and section of its first visible task pinned
-  above the scrollable rows, so tasks never lose their group context when their
-  original headers scroll away.
+- Task navigation stops at the first and last tasks instead of wrapping around.
+- The task list pins only the missing group context for its first visible task:
+  no duplicate while both headers remain visible, then the project, then the
+  section as each original header scrolls away.
+- Project and section headers are truncated with `...` to stay inside the task
+  pane at the current terminal width.
 - The supported theme names are `classic`, `forest`, `sunset`, `ocean`, and
   `midnight`. `classic` is the default for compatibility. Every theme must have
   its own palette and symbols for panels, projects, sections, tasks, status,
