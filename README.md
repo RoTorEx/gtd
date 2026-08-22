@@ -18,7 +18,8 @@ gtd
 gtd --project "Work"
 ```
 
-Run `make check` to format, lint, and test.
+Run `make check` to verify formatting, lint, and test without rewriting source
+files. Run `make fmt` explicitly to format.
 
 ## Kernel sync (sanity check)
 

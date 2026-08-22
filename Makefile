@@ -1,4 +1,4 @@
-.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run release release-tag release-push release-publish vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
+.PHONY: cargo-target-dir install install-local setup-path build test lint fmt check run vibe-kernel-set vibe-kernel-path vibe-pull vibe pull
 
 PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
@@ -61,22 +61,13 @@ lint: cargo-target-dir
 fmt:
 	cargo fmt --all
 
-check: fmt lint test
+check: cargo-target-dir
+	cargo fmt --all -- --check
+	cargo clippy --all-targets --all-features -- -D warnings
+	cargo test
 
 run: cargo-target-dir
 	cargo run
-
-release:
-	@echo "TODO: implement plain release with GitHub Release CI/CD."; exit 1
-
-release-tag:
-	@echo "TODO: implement release tagging for GitHub Release CI/CD."; exit 1
-
-release-push:
-	@echo "TODO: implement release push that triggers GitHub Release CI/CD."; exit 1
-
-release-publish:
-	@echo "TODO: implement CI/CD release artifact publish handoff."; exit 1
 
 vibe-kernel-path:
 	@if [ ! -f ".vibe/KERNEL_SOURCE" ]; then \
