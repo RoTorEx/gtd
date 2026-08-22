@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-22
+
 ### Changed
 
 - Keep the project and section of the first visible task pinned above the
