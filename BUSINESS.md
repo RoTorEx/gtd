@@ -70,6 +70,8 @@ to the Todoist application.
 - The task list leaves a blank row before a project or section that follows
   tasks, so group boundaries remain visually distinct.
 - Task navigation stops at the first and last tasks instead of wrapping around.
+- The task-list viewport persists between frames, so the selection moves within
+  the same scroll padding before the viewport moves in either direction.
 - The task list pins only the missing group context for its first visible task:
   no duplicate while both headers remain visible, then the project, then the
   section as each original header scrolls away.

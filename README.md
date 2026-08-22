@@ -62,7 +62,8 @@ due date, priority, labels, comments, URL, and ID.
 Navigation stops at the first and last tasks. As group headers scroll away, the
 missing project and then section are pinned at the top without duplicating
 headers that remain visible. Long group names are truncated with `...` to stay
-inside the left pane.
+inside the left pane. Upward and downward navigation use the same cursor-first
+scroll behavior.
 
 ## Themes
 

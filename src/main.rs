@@ -159,6 +159,7 @@ struct App {
     entries: Vec<ListEntry>,
     selectable: Vec<usize>,
     selected: usize,
+    list_offset: usize,
     max_age: usize,
     confirmation: Option<ConfirmState>,
     toast: Option<Toast>,
@@ -192,6 +193,7 @@ impl App {
             entries: Vec::new(),
             selectable: Vec::new(),
             selected: 0,
+            list_offset: 0,
             max_age: 0,
             confirmation: None,
             toast: None,
@@ -287,6 +289,7 @@ impl App {
 
         self.entries = entries;
         self.selectable = selectable;
+        self.list_offset = 0;
         if self.selected >= self.selectable.len() && !self.selectable.is_empty() {
             self.selected = self.selectable.len() - 1;
         }
@@ -621,7 +624,7 @@ fn refresh_after_mutation(app: &mut App, rt: &tokio::runtime::Runtime) -> Result
     Ok(())
 }
 
-fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
+fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
     let area = frame.area();
 
     let main_chunks = Layout::default()
@@ -645,7 +648,7 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
     }
 }
 
-fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+fn draw_task_list(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     let theme = &app.theme;
     let block = Block::default()
         .title(theme.tasks_title.as_str())
@@ -744,12 +747,15 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         )
         .scroll_padding(3);
 
-    let mut list_state = ratatui::widgets::ListState::default();
-    list_state.select(selected_entry_idx);
+    let mut list_state = ratatui::widgets::ListState::default()
+        .with_offset(app.list_offset)
+        .with_selected(selected_entry_idx);
     frame.render_stateful_widget(list.clone(), inner, &mut list_state);
 
     let pinned = pinned_group_context(&app.entries, list_state.offset(), inner.height as usize);
     if pinned.is_none() {
+        drop(list);
+        app.list_offset = list_state.offset();
         return;
     }
 
@@ -759,8 +765,9 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         .split(inner);
     frame.render_widget(ClearWidget, inner);
 
-    let mut list_state = ratatui::widgets::ListState::default();
-    list_state.select(selected_entry_idx);
+    let mut list_state = ratatui::widgets::ListState::default()
+        .with_offset(list_state.offset())
+        .with_selected(selected_entry_idx);
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
     if let Some(pinned) =
@@ -771,6 +778,7 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             chunks[0],
         );
     }
+    app.list_offset = list_state.offset();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1616,6 +1624,51 @@ mod tests {
         assert_eq!(bounded_selection(4, 5, 1), 4);
         assert_eq!(bounded_selection(2, 5, -10), 0);
         assert_eq!(bounded_selection(2, 5, 10), 4);
+    }
+
+    #[test]
+    fn upward_navigation_keeps_the_viewport_until_cursor_reaches_its_padding() {
+        let projects = vec![Project {
+            id: "project".to_string(),
+            name: "Work".to_string(),
+        }];
+        let tasks = (0..30)
+            .map(|index| {
+                let mut task = test_task(&index.to_string(), "");
+                task.order = index;
+                task
+            })
+            .collect();
+        let mut app = App::new(
+            reqwest::Client::new(),
+            String::new(),
+            None,
+            projects,
+            Vec::new(),
+            tasks,
+            theme::get("classic").unwrap(),
+        );
+        app.selected = app.selectable.len() - 1;
+        let backend = ratatui::backend::TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                draw_task_list(frame, &mut app, area);
+            })
+            .unwrap();
+        let bottom_offset = app.list_offset;
+        app.move_selection(-1);
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                draw_task_list(frame, &mut app, area);
+            })
+            .unwrap();
+
+        assert!(bottom_offset > 0);
+        assert_eq!(app.list_offset, bottom_offset);
     }
 
     #[test]
