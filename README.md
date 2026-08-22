@@ -50,7 +50,7 @@ gtd update
 | `c` | Complete selected task (with confirmation) |
 | `d` | Delete selected task (with confirmation) |
 | `r` | Refresh the task list |
-| `q` / `Esc` | Quit |
+| `q` / `Esc` / `Ctrl+C` | Quit |
 
 The left pane shows each task's title plus up to 30 characters of its
 description. The right pane shows the full description, project, section, age,

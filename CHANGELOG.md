@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Make `Ctrl+C` exit the interactive UI instead of opening the complete-task
+  confirmation.
+
 ## [0.2.4] - 2026-08-22
 
 ### Changed

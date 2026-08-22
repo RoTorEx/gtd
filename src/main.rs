@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -394,8 +394,12 @@ impl Drop for AltScreenGuard {
     }
 }
 
-fn key_matches(key: KeyCode, latin: char) -> bool {
-    let c = match key {
+fn key_matches(key: &KeyEvent, latin: char) -> bool {
+    if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+        return false;
+    }
+
+    let c = match key.code {
         KeyCode::Char(c) => c.to_lowercase().next().unwrap_or(c),
         _ => return false,
     };
@@ -421,6 +425,12 @@ fn key_matches(key: KeyCode, latin: char) -> bool {
     c == cyrillic
 }
 
+fn is_quit_key(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Esc)
+        || key_matches(key, 'q')
+        || (key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')))
+}
+
 fn run_tui(app: &mut App) -> Result<()> {
     let _guard = AltScreenGuard;
     let backend = CrosstermBackend::new(io::stdout());
@@ -439,21 +449,23 @@ fn run_tui(app: &mut App) -> Result<()> {
                 continue;
             }
 
+            if is_quit_key(&key) {
+                break;
+            }
+
             if app.confirmation.is_some() {
-                handle_confirmation_key(app, key.code, &rt)?;
+                handle_confirmation_key(app, &key, &rt)?;
                 continue;
             }
 
             match key.code {
-                KeyCode::Esc => break,
-                key if key_matches(key, 'q') => break,
-                key if key_matches(key, 'k') || matches!(key, KeyCode::Up) => {
+                _ if key_matches(&key, 'k') || matches!(key.code, KeyCode::Up) => {
                     app.move_selection(-1)
                 }
-                key if key_matches(key, 'j') || matches!(key, KeyCode::Down) => {
+                _ if key_matches(&key, 'j') || matches!(key.code, KeyCode::Down) => {
                     app.move_selection(1)
                 }
-                key if key_matches(key, 'c') => {
+                _ if key_matches(&key, 'c') => {
                     if let Some(item) = app.selected_task() {
                         app.confirmation = Some(ConfirmState {
                             action: ConfirmAction::Complete(item.task.id.clone()),
@@ -464,7 +476,7 @@ fn run_tui(app: &mut App) -> Result<()> {
                         });
                     }
                 }
-                key if key_matches(key, 'd') => {
+                _ if key_matches(&key, 'd') => {
                     if let Some(item) = app.selected_task() {
                         app.confirmation = Some(ConfirmState {
                             action: ConfirmAction::Delete(item.task.id.clone()),
@@ -475,7 +487,7 @@ fn run_tui(app: &mut App) -> Result<()> {
                         });
                     }
                 }
-                key if key_matches(key, 'r') => {
+                _ if key_matches(&key, 'r') => {
                     match rt.block_on(fetch_tasks(&app.client, &app.token)) {
                         Ok(tasks) => {
                             app.set_tasks(tasks);
@@ -484,7 +496,7 @@ fn run_tui(app: &mut App) -> Result<()> {
                         Err(e) => app.show_error(format!("Refresh failed: {e}")),
                     }
                 }
-                key if key_matches(key, 'o') => {
+                _ if key_matches(&key, 'o') => {
                     if let Some(url) = app.selected_task().map(|item| task_browser_url(&item.task))
                     {
                         match open::that(&url) {
@@ -503,14 +515,14 @@ fn run_tui(app: &mut App) -> Result<()> {
 
 fn handle_confirmation_key(
     app: &mut App,
-    code: KeyCode,
+    key: &KeyEvent,
     rt: &tokio::runtime::Runtime,
 ) -> Result<()> {
     let Some(confirm) = app.confirmation.take() else {
         return Ok(());
     };
 
-    if key_matches(code, 'y') {
+    if key_matches(key, 'y') {
         match confirm.action {
             ConfirmAction::Complete(id) => {
                 match rt.block_on(complete_task(&app.client, &app.token, &id)) {
@@ -1250,10 +1262,30 @@ mod tests {
 
     #[test]
     fn keyboard_shortcuts_ignore_case_and_support_cyrillic_layout() {
-        assert!(key_matches(KeyCode::Char('o'), 'o'));
-        assert!(key_matches(KeyCode::Char('O'), 'o'));
-        assert!(key_matches(KeyCode::Char('щ'), 'o'));
-        assert!(key_matches(KeyCode::Char('Щ'), 'o'));
+        assert!(key_matches(
+            &KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+            'o'
+        ));
+        assert!(key_matches(
+            &KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
+            'o'
+        ));
+        assert!(key_matches(
+            &KeyEvent::new(KeyCode::Char('щ'), KeyModifiers::NONE),
+            'o'
+        ));
+        assert!(key_matches(
+            &KeyEvent::new(KeyCode::Char('Щ'), KeyModifiers::SHIFT),
+            'o'
+        ));
+    }
+
+    #[test]
+    fn ctrl_c_quits_instead_of_matching_complete_shortcut() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+        assert!(is_quit_key(&ctrl_c));
+        assert!(!key_matches(&ctrl_c, 'c'));
     }
 
     #[test]

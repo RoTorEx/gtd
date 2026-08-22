@@ -36,6 +36,8 @@ to the Todoist application.
   Todoist API requests, and is never persisted or printed.
 - Read-only display actions do not mutate Todoist data.
 - Completing and deleting tasks are the only Todoist mutations.
+- Exit key combinations must quit without triggering or confirming a task
+  mutation.
 - Project matching for `--project` is case-insensitive and exact.
 - Missing project or section metadata must not prevent the remaining tasks from
   being displayed.
