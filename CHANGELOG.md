@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-08-22
+
 ### Fixed
 
 - Stop task navigation at the first and last items instead of wrapping around.
