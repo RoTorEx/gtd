@@ -4,6 +4,10 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Changed
+
+- Add visual spacing before new project and section groups in the TUI task list.
+
 ## [0.2.3] - 2026-08-22
 
 ### Fixed

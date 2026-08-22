@@ -106,6 +106,7 @@ struct TaskItem {
 
 #[derive(Clone, Debug)]
 enum ListEntry {
+    Spacer,
     ProjectHeader(String),
     SectionHeader(String),
     Task(Box<TaskItem>),
@@ -246,6 +247,9 @@ impl App {
 
         for item in items {
             if current_project.as_ref() != Some(&item.project_name) {
+                if matches!(entries.last(), Some(ListEntry::Task(_))) {
+                    entries.push(ListEntry::Spacer);
+                }
                 current_project = Some(item.project_name.clone());
                 current_section = None;
                 entries.push(ListEntry::ProjectHeader(item.project_name.clone()));
@@ -254,6 +258,9 @@ impl App {
             if current_section.as_ref() != Some(&item.section_name) {
                 current_section = Some(item.section_name.clone());
                 if item.section_name != "No section" {
+                    if matches!(entries.last(), Some(ListEntry::Task(_))) {
+                        entries.push(ListEntry::Spacer);
+                    }
                     entries.push(ListEntry::SectionHeader(item.section_name.clone()));
                 }
             }
@@ -592,6 +599,7 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         .iter()
         .map(|entry| {
             let line = match entry {
+                ListEntry::Spacer => Line::default(),
                 ListEntry::ProjectHeader(name) => Line::from(vec![
                     Span::styled("▶ ", Style::default().fg(Color::Yellow)),
                     Span::styled(
@@ -1246,6 +1254,58 @@ mod tests {
         assert!(key_matches(KeyCode::Char('O'), 'o'));
         assert!(key_matches(KeyCode::Char('щ'), 'o'));
         assert!(key_matches(KeyCode::Char('Щ'), 'o'));
+    }
+
+    #[test]
+    fn separates_new_projects_and_sections_from_preceding_tasks() {
+        let projects = vec![
+            Project {
+                id: "a".to_string(),
+                name: "Alpha".to_string(),
+            },
+            Project {
+                id: "b".to_string(),
+                name: "Beta".to_string(),
+            },
+        ];
+        let sections = vec![
+            Section {
+                id: "one".to_string(),
+                name: "One".to_string(),
+                order: 1,
+            },
+            Section {
+                id: "two".to_string(),
+                name: "Two".to_string(),
+                order: 2,
+            },
+        ];
+        let mut alpha_one = test_task("1", "");
+        alpha_one.project_id = "a".to_string();
+        alpha_one.section_id = Some("one".to_string());
+        let mut alpha_two = test_task("2", "");
+        alpha_two.project_id = "a".to_string();
+        alpha_two.section_id = Some("two".to_string());
+        let mut beta = test_task("3", "");
+        beta.project_id = "b".to_string();
+
+        let app = App::new(
+            reqwest::Client::new(),
+            String::new(),
+            None,
+            projects,
+            sections,
+            vec![alpha_one, alpha_two, beta],
+        );
+
+        assert!(matches!(app.entries[0], ListEntry::ProjectHeader(_)));
+        assert!(matches!(app.entries[1], ListEntry::SectionHeader(_)));
+        assert!(matches!(app.entries[2], ListEntry::Task(_)));
+        assert!(matches!(app.entries[3], ListEntry::Spacer));
+        assert!(matches!(app.entries[4], ListEntry::SectionHeader(_)));
+        assert!(matches!(app.entries[5], ListEntry::Task(_)));
+        assert!(matches!(app.entries[6], ListEntry::Spacer));
+        assert!(matches!(app.entries[7], ListEntry::ProjectHeader(_)));
     }
 
     fn test_task(id: &str, url: &str) -> Task {

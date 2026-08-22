@@ -56,6 +56,8 @@ to the Todoist application.
   they do not change Todoist priority or ordering.
 - TUI notices and errors appear in the center for 2 seconds. This keeps feedback
   visible without permanently taking space from the task list or status bar.
+- The task list leaves a blank row before a project or section that follows
+  tasks, so group boundaries remain visually distinct.
 
 ## Non-goals
 
