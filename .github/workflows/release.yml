@@ -80,6 +80,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v7
         with:
           path: release-assets
