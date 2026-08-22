@@ -15,12 +15,13 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, stdout};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod update;
 
 const TODOIST_API: &str = "https://api.todoist.com/api/v1";
 const DESC_PREVIEW_LEN: usize = 30;
+const TOAST_DURATION: Duration = Duration::from_secs(2);
 
 #[derive(Parser)]
 #[command(name = "gtd", version, about = "Review Todoist tasks and their age")]
@@ -122,6 +123,19 @@ struct ConfirmState {
     message: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToastKind {
+    Info,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+struct Toast {
+    message: String,
+    kind: ToastKind,
+    expires_at: Instant,
+}
+
 struct App {
     client: reqwest::Client,
     token: String,
@@ -133,7 +147,7 @@ struct App {
     selected: usize,
     max_age: usize,
     confirmation: Option<ConfirmState>,
-    message: Option<String>,
+    toast: Option<Toast>,
 }
 
 impl App {
@@ -164,7 +178,7 @@ impl App {
             selected: 0,
             max_age: 0,
             confirmation: None,
-            message: None,
+            toast: None,
         };
         app.set_tasks(tasks);
         app
@@ -277,6 +291,32 @@ impl App {
         };
         self.selected = new;
     }
+
+    fn show_info(&mut self, message: impl Into<String>) {
+        self.show_toast(message, ToastKind::Info);
+    }
+
+    fn show_error(&mut self, message: impl Into<String>) {
+        self.show_toast(message, ToastKind::Error);
+    }
+
+    fn show_toast(&mut self, message: impl Into<String>, kind: ToastKind) {
+        self.toast = Some(Toast {
+            message: message.into(),
+            kind,
+            expires_at: Instant::now() + TOAST_DURATION,
+        });
+    }
+
+    fn clear_expired_toast(&mut self) {
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|toast| Instant::now() >= toast.expires_at)
+        {
+            self.toast = None;
+        }
+    }
 }
 
 #[tokio::main]
@@ -349,7 +389,7 @@ impl Drop for AltScreenGuard {
 
 fn key_matches(key: KeyCode, latin: char) -> bool {
     let c = match key {
-        KeyCode::Char(c) => c,
+        KeyCode::Char(c) => c.to_lowercase().next().unwrap_or(c),
         _ => return false,
     };
 
@@ -382,6 +422,7 @@ fn run_tui(app: &mut App) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
 
     loop {
+        app.clear_expired_toast();
         terminal.draw(|f| draw_ui(f, app))?;
 
         if event::poll(Duration::from_millis(100))?
@@ -395,8 +436,6 @@ fn run_tui(app: &mut App) -> Result<()> {
                 handle_confirmation_key(app, key.code, &rt)?;
                 continue;
             }
-
-            app.message = None;
 
             match key.code {
                 KeyCode::Esc => break,
@@ -433,24 +472,17 @@ fn run_tui(app: &mut App) -> Result<()> {
                     match rt.block_on(fetch_tasks(&app.client, &app.token)) {
                         Ok(tasks) => {
                             app.set_tasks(tasks);
-                            app.message = Some("Refreshed tasks".to_string());
+                            app.show_info("Refreshed tasks");
                         }
-                        Err(e) => app.message = Some(format!("Refresh failed: {e}")),
+                        Err(e) => app.show_error(format!("Refresh failed: {e}")),
                     }
                 }
                 key if key_matches(key, 'o') => {
-                    if let Some(item) = app.selected_task() {
-                        if item.task.url.is_empty() {
-                            app.message = Some("Task has no URL".to_string());
-                        } else {
-                            match open::that(&item.task.url) {
-                                Ok(()) => {
-                                    app.message = Some("Opened in browser".to_string());
-                                }
-                                Err(e) => {
-                                    app.message = Some(format!("Failed to open: {e}"));
-                                }
-                            }
+                    if let Some(url) = app.selected_task().map(|item| task_browser_url(&item.task))
+                    {
+                        match open::that(&url) {
+                            Ok(()) => app.show_info("Opened in browser"),
+                            Err(e) => app.show_error(format!("Failed to open: {e}")),
                         }
                     }
                 }
@@ -476,24 +508,24 @@ fn handle_confirmation_key(
             ConfirmAction::Complete(id) => {
                 match rt.block_on(complete_task(&app.client, &app.token, &id)) {
                     Ok(()) => {
-                        app.message = Some(format!("Completed task {id}"));
+                        app.show_info(format!("Completed task {id}"));
                         refresh_after_mutation(app, rt)?;
                     }
-                    Err(e) => app.message = Some(format!("Complete failed: {e}")),
+                    Err(e) => app.show_error(format!("Complete failed: {e}")),
                 }
             }
             ConfirmAction::Delete(id) => {
                 match rt.block_on(delete_task(&app.client, &app.token, &id, true)) {
                     Ok(()) => {
-                        app.message = Some(format!("Deleted task {id}"));
+                        app.show_info(format!("Deleted task {id}"));
                         refresh_after_mutation(app, rt)?;
                     }
-                    Err(e) => app.message = Some(format!("Delete failed: {e}")),
+                    Err(e) => app.show_error(format!("Delete failed: {e}")),
                 }
             }
         }
     } else {
-        app.message = Some("Cancelled".to_string());
+        app.show_info("Cancelled");
     }
 
     Ok(())
@@ -517,7 +549,7 @@ fn refresh_after_mutation(app: &mut App, rt: &tokio::runtime::Runtime) -> Result
                 }
             }
         }
-        Err(e) => app.message = Some(format!("Refresh failed: {e}")),
+        Err(e) => app.show_error(format!("Refresh failed: {e}")),
     }
     Ok(())
 }
@@ -541,6 +573,8 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
 
     if let Some(confirm) = &app.confirmation {
         draw_confirmation(frame, confirm, area);
+    } else if let Some(toast) = &app.toast {
+        draw_toast(frame, toast, area);
     }
 }
 
@@ -733,7 +767,7 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         ]));
         lines.push(Line::from(vec![
             Span::styled("URL: ", Style::default().fg(Color::Blue)),
-            Span::raw(&task.url),
+            Span::raw(task_browser_url(task)),
         ]));
 
         Text::from(lines)
@@ -749,27 +783,41 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+fn draw_status_bar(frame: &mut ratatui::Frame, _app: &App, area: Rect) {
     let help = "↑/k ↓/j navigate • o open • c complete • d delete • r refresh • q quit";
-    let right = app.message.as_deref().unwrap_or("").to_string();
-
-    let msg_width = (right.len() as u16).min(area.width);
-
-    let layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(msg_width)])
-        .split(area);
-
     let help_widget = Paragraph::new(help)
         .style(Style::default().fg(Color::Gray))
         .alignment(Alignment::Left);
 
-    let msg_widget = Paragraph::new(right)
-        .style(Style::default().fg(Color::Green))
-        .alignment(Alignment::Right);
+    frame.render_widget(help_widget, area);
+}
 
-    frame.render_widget(help_widget, layout[0]);
-    frame.render_widget(msg_widget, layout[1]);
+fn draw_toast(frame: &mut ratatui::Frame, toast: &Toast, area: Rect) {
+    let available_width = area.width.saturating_sub(4);
+    let width = (toast.message.chars().count() as u16 + 8)
+        .min(available_width)
+        .max(1);
+    let popup = centered_rect(width, 5.min(area.height), area);
+    let (title, color) = match toast.kind {
+        ToastKind::Info => ("Notice", Color::Green),
+        ToastKind::Error => ("Error", Color::Red),
+    };
+
+    frame.render_widget(ClearWidget, popup);
+    let paragraph = Paragraph::new(Text::from(vec![
+        Line::default(),
+        Line::from(toast.message.as_str()),
+    ]))
+    .block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color)),
+    )
+    .style(Style::default().fg(color))
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, popup);
 }
 
 fn draw_confirmation(frame: &mut ratatui::Frame, confirm: &ConfirmState, area: Rect) {
@@ -1042,6 +1090,14 @@ fn strip_markdown_links(text: &str) -> String {
     out
 }
 
+fn task_browser_url(task: &Task) -> String {
+    if task.url.trim().is_empty() {
+        format!("https://app.todoist.com/app/task/{}", task.id)
+    } else {
+        task.url.clone()
+    }
+}
+
 fn truncate_description_preview(desc: &str) -> String {
     let desc = desc.trim();
     if desc.is_empty() {
@@ -1165,5 +1221,47 @@ mod tests {
         let parsed = parse_datetime("2026-08-22T12:30:00+03:00").unwrap();
 
         assert_eq!(parsed.to_rfc3339(), "2026-08-22T09:30:00+00:00");
+    }
+
+    #[test]
+    fn builds_current_todoist_url_when_api_url_is_missing() {
+        let task = test_task("6qQhr9Qrg3v2QpVR", "");
+
+        assert_eq!(
+            task_browser_url(&task),
+            "https://app.todoist.com/app/task/6qQhr9Qrg3v2QpVR"
+        );
+    }
+
+    #[test]
+    fn keeps_api_url_when_present() {
+        let task = test_task("task-id", "https://example.test/task");
+
+        assert_eq!(task_browser_url(&task), "https://example.test/task");
+    }
+
+    #[test]
+    fn keyboard_shortcuts_ignore_case_and_support_cyrillic_layout() {
+        assert!(key_matches(KeyCode::Char('o'), 'o'));
+        assert!(key_matches(KeyCode::Char('O'), 'o'));
+        assert!(key_matches(KeyCode::Char('щ'), 'o'));
+        assert!(key_matches(KeyCode::Char('Щ'), 'o'));
+    }
+
+    fn test_task(id: &str, url: &str) -> Task {
+        Task {
+            id: id.to_string(),
+            content: "Task".to_string(),
+            description: String::new(),
+            added_at: "2026-08-22T09:30:00Z".to_string(),
+            project_id: "project".to_string(),
+            section_id: None,
+            labels: Vec::new(),
+            priority: 1,
+            due: None,
+            url: url.to_string(),
+            comment_count: 0,
+            order: 0,
+        }
     }
 }

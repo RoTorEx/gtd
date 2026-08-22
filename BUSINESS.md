@@ -43,6 +43,8 @@ to the Todoist application.
   checksum from the public `RoTorEx/gtd` GitHub repository, verifies SHA-256,
   verifies the extracted binary through `gtd -V`, and atomically replaces the
   current executable.
+- Opening a task uses the API-provided URL when available and otherwise builds
+  the current Todoist web URL from the task ID.
 
 ## Decision-bearing constants
 
@@ -52,6 +54,8 @@ to the Todoist application.
 - Task ages under 7 days are green, ages from 7 through 29 days are yellow, and
   ages of 30 days or more are red. These thresholds are presentation cues only;
   they do not change Todoist priority or ordering.
+- TUI notices and errors appear in the center for 2 seconds. This keeps feedback
+  visible without permanently taking space from the task list or status bar.
 
 ## Non-goals
 

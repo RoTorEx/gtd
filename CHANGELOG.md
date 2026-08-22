@@ -4,6 +4,14 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Open Todoist tasks by their current web URL even though API v1 no longer
+  returns a task `url` property.
+- Show transient errors and notices in a centered two-second toast instead of
+  leaving them indefinitely in the status-bar corner.
+- Accept uppercase and Cyrillic-layout variants of TUI shortcut keys.
+
 ## [0.2.2] - 2026-08-22
 
 ### Added
