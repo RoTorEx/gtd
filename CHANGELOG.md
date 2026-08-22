@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-22
+
 ### Added
 
 - Added an interactive terminal UI with task navigation, a detail pane, refresh,
