@@ -6,8 +6,9 @@ Tracks real product and release progress.
 
 ### Added
 
-- Add `classic`, `forest`, and `sunset` TUI themes with distinct palettes and
-  interface symbols, selected through `~/.config/gtd/config.toml`.
+- Add five TUI themes—`classic`, `forest`, `sunset`, `ocean`, and `midnight`—
+  with distinct palettes and symbol sets, selected through
+  `~/.config/gtd/config.toml`.
 
 ### Changed
 

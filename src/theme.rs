@@ -3,7 +3,7 @@ use ratatui::style::Color;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-pub const THEME_NAMES: [&str; 3] = ["classic", "forest", "sunset"];
+pub const THEME_NAMES: [&str; 5] = ["classic", "forest", "sunset", "ocean", "midnight"];
 
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
@@ -14,6 +14,9 @@ pub struct Theme {
     pub section_icon: &'static str,
     pub task_icon: &'static str,
     pub help_separator: &'static str,
+    pub notice_title: &'static str,
+    pub error_title: &'static str,
+    pub confirm_title: &'static str,
     pub list_border: Color,
     pub detail_border: Color,
     pub label: Color,
@@ -38,12 +41,15 @@ impl Theme {
     pub fn classic() -> Self {
         Self {
             name: "classic",
-            tasks_title: "Tasks",
-            details_title: "Details",
+            tasks_title: "▣ Tasks",
+            details_title: "▤ Details",
             project_icon: "▶ ",
             section_icon: "  ├ ",
-            task_icon: "    ",
+            task_icon: "  · ",
             help_separator: "•",
+            notice_title: "✓ Notice",
+            error_title: "! Error",
+            confirm_title: "? Confirm",
             list_border: Color::Blue,
             detail_border: Color::Magenta,
             label: Color::Blue,
@@ -68,12 +74,15 @@ impl Theme {
     fn forest() -> Self {
         Self {
             name: "forest",
-            tasks_title: "◆ Tasks",
-            details_title: "◆ Details",
+            tasks_title: "♣ Tasks",
+            details_title: "⌁ Details",
             project_icon: "◆ ",
             section_icon: "  └ ",
-            task_icon: "  • ",
+            task_icon: "  ∙ ",
             help_separator: "◇",
+            notice_title: "❧ Notice",
+            error_title: "⚠ Error",
+            confirm_title: "⌘ Confirm",
             list_border: Color::Green,
             detail_border: Color::LightGreen,
             label: Color::LightGreen,
@@ -98,12 +107,15 @@ impl Theme {
     fn sunset() -> Self {
         Self {
             name: "sunset",
-            tasks_title: "◉ Tasks",
-            details_title: "◉ Details",
+            tasks_title: "☀ Tasks",
+            details_title: "✺ Details",
             project_icon: "◉ ",
             section_icon: "  ╰ ",
             task_icon: "  ◦ ",
-            help_separator: "·",
+            help_separator: "✦",
+            notice_title: "✹ Notice",
+            error_title: "‼ Error",
+            confirm_title: "✷ Confirm",
             list_border: Color::LightRed,
             detail_border: Color::LightMagenta,
             label: Color::Yellow,
@@ -125,11 +137,79 @@ impl Theme {
         }
     }
 
+    fn ocean() -> Self {
+        Self {
+            name: "ocean",
+            tasks_title: "≈ Tasks",
+            details_title: "≋ Details",
+            project_icon: "◈ ",
+            section_icon: "  ╭ ",
+            task_icon: "  ○ ",
+            help_separator: "~",
+            notice_title: "≃ Notice",
+            error_title: "⚓ Error",
+            confirm_title: "◌ Confirm",
+            list_border: Color::Cyan,
+            detail_border: Color::Blue,
+            label: Color::LightCyan,
+            project_icon_color: Color::LightBlue,
+            project: Color::LightCyan,
+            section_icon_color: Color::Cyan,
+            section: Color::LightBlue,
+            task: Color::White,
+            description: Color::Cyan,
+            selected_bg: Color::Cyan,
+            selected_fg: Color::Black,
+            status: Color::LightCyan,
+            age_fresh: Color::LightCyan,
+            age_aging: Color::LightBlue,
+            age_old: Color::Magenta,
+            info: Color::LightCyan,
+            error: Color::LightRed,
+            confirm: Color::LightBlue,
+        }
+    }
+
+    fn midnight() -> Self {
+        Self {
+            name: "midnight",
+            tasks_title: "☾ Tasks",
+            details_title: "✧ Details",
+            project_icon: "★ ",
+            section_icon: "  ┆ ",
+            task_icon: "  ⋅ ",
+            help_separator: "⋆",
+            notice_title: "☄ Notice",
+            error_title: "× Error",
+            confirm_title: "☽ Confirm",
+            list_border: Color::DarkGray,
+            detail_border: Color::LightBlue,
+            label: Color::LightMagenta,
+            project_icon_color: Color::LightBlue,
+            project: Color::LightBlue,
+            section_icon_color: Color::DarkGray,
+            section: Color::LightMagenta,
+            task: Color::Gray,
+            description: Color::DarkGray,
+            selected_bg: Color::DarkGray,
+            selected_fg: Color::White,
+            status: Color::Gray,
+            age_fresh: Color::LightBlue,
+            age_aging: Color::LightMagenta,
+            age_old: Color::LightRed,
+            info: Color::LightBlue,
+            error: Color::LightRed,
+            confirm: Color::LightMagenta,
+        }
+    }
+
     fn named(name: &str) -> Option<Self> {
         match name {
             "classic" => Some(Self::classic()),
             "forest" => Some(Self::forest()),
             "sunset" => Some(Self::sunset()),
+            "ocean" => Some(Self::ocean()),
+            "midnight" => Some(Self::midnight()),
             _ => None,
         }
     }
@@ -202,14 +282,43 @@ mod tests {
     }
 
     #[test]
-    fn themes_have_distinct_colors_and_icons() {
-        let classic = Theme::classic();
-        let forest = Theme::named("forest").unwrap();
-        let sunset = Theme::named("sunset").unwrap();
+    fn every_theme_has_a_distinct_palette_and_symbol_set() {
+        let themes: Vec<_> = THEME_NAMES
+            .iter()
+            .map(|name| Theme::named(name).unwrap())
+            .collect();
 
-        assert_ne!(classic.list_border, forest.list_border);
-        assert_ne!(forest.list_border, sunset.list_border);
-        assert_ne!(classic.project_icon, forest.project_icon);
-        assert_ne!(forest.project_icon, sunset.project_icon);
+        for (index, theme) in themes.iter().enumerate() {
+            for other in &themes[index + 1..] {
+                assert_ne!(
+                    (
+                        theme.list_border,
+                        theme.detail_border,
+                        theme.project,
+                        theme.section,
+                        theme.selected_bg,
+                    ),
+                    (
+                        other.list_border,
+                        other.detail_border,
+                        other.project,
+                        other.section,
+                        other.selected_bg,
+                    ),
+                    "{} and {} share a palette",
+                    theme.name,
+                    other.name
+                );
+                assert_ne!(theme.tasks_title, other.tasks_title);
+                assert_ne!(theme.details_title, other.details_title);
+                assert_ne!(theme.project_icon, other.project_icon);
+                assert_ne!(theme.section_icon, other.section_icon);
+                assert_ne!(theme.task_icon, other.task_icon);
+                assert_ne!(theme.help_separator, other.help_separator);
+                assert_ne!(theme.notice_title, other.notice_title);
+                assert_ne!(theme.error_title, other.error_title);
+                assert_ne!(theme.confirm_title, other.confirm_title);
+            }
+        }
     }
 }

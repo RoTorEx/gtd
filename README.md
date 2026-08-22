@@ -70,9 +70,14 @@ theme = "classic"
 
 | Theme | Palette and interface symbols |
 |-------|-------------------------------|
-| `classic` | The original blue, cyan, and magenta palette with `▶` project and `├` section markers |
-| `forest` | Green and yellow palette with `◆` project, `└` section, and `•` task markers |
-| `sunset` | Red, magenta, and yellow palette with `◉` project, `╰` section, and `◦` task markers |
+| `classic` | Blue, cyan, and magenta with `▣`/`▤` panels and `▶`, `├`, `·` list markers |
+| `forest` | Green and yellow with `♣`/`⌁` panels and `◆`, `└`, `∙` list markers |
+| `sunset` | Red, magenta, and yellow with `☀`/`✺` panels and `◉`, `╰`, `◦` list markers |
+| `ocean` | Cyan and blue with `≈`/`≋` panels and `◈`, `╭`, `○` list markers |
+| `midnight` | Dark gray, blue, and magenta with `☾`/`✧` panels and `★`, `┆`, `⋅` list markers |
+
+Each theme also has its own status separator and notice, error, and confirmation
+symbols; symbol sets are not shared between themes.
 
 Restart `gtd` after changing the value. To keep the config elsewhere, set
 `GTD_CONFIG` to its file path. When `XDG_CONFIG_HOME` is set, the default path

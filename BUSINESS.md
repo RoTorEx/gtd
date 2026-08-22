@@ -64,9 +64,11 @@ to the Todoist application.
   visible without permanently taking space from the task list or status bar.
 - The task list leaves a blank row before a project or section that follows
   tasks, so group boundaries remain visually distinct.
-- The supported theme names are `classic`, `forest`, and `sunset`. `classic`
-  preserves the original interface and is the default for compatibility;
-  theme resolution and visual distinction are protected by unit tests.
+- The supported theme names are `classic`, `forest`, `sunset`, `ocean`, and
+  `midnight`. `classic` is the default for compatibility. Every theme must have
+  its own palette and symbols for panels, projects, sections, tasks, status,
+  notices, errors, and confirmations; pairwise distinction is protected by unit
+  tests.
 
 ## Non-goals
 

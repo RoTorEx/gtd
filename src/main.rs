@@ -853,8 +853,8 @@ fn draw_toast(frame: &mut ratatui::Frame, app: &App, toast: &Toast, area: Rect) 
         .max(1);
     let popup = centered_rect(width, 5.min(area.height), area);
     let (title, color) = match toast.kind {
-        ToastKind::Info => ("Notice", app.theme.info),
-        ToastKind::Error => ("Error", app.theme.error),
+        ToastKind::Info => (app.theme.notice_title, app.theme.info),
+        ToastKind::Error => (app.theme.error_title, app.theme.error),
     };
 
     frame.render_widget(ClearWidget, popup);
@@ -884,7 +884,7 @@ fn draw_confirmation(frame: &mut ratatui::Frame, app: &App, confirm: &ConfirmSta
     frame.render_widget(ClearWidget, popup);
 
     let block = Block::default()
-        .title("Confirm")
+        .title(app.theme.confirm_title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.confirm));
 
