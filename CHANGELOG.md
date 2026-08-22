@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-08-22
+
 ### Fixed
 
 - Preserve the task-list viewport between frames so upward scrolling moves the
