@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use std::io::{self, stdout};
 use std::time::Duration;
 
+mod update;
+
 const TODOIST_API: &str = "https://api.todoist.com/api/v1";
 const DESC_PREVIEW_LEN: usize = 30;
 
@@ -30,6 +32,15 @@ struct Args {
     /// Print the plain grouped list and exit instead of opening the interactive TUI
     #[arg(long)]
     plain: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Install the latest Apple Silicon macOS release
+    Update,
 }
 
 #[derive(Deserialize, Debug)]
@@ -271,6 +282,11 @@ impl App {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    if matches!(args.command, Some(Command::Update)) {
+        return update::run().await;
+    }
+
     let token = std::env::var("TODOIST_API_TOKEN")
         .context("TODOIST_API_TOKEN environment variable must be set")?;
 

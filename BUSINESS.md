@@ -27,6 +27,8 @@ to the Todoist application.
    a task, or delete a task.
 5. Require an explicit in-application confirmation before completing or deleting
    a task.
+6. On Apple Silicon macOS, let the user replace the running installation with
+   the latest published GitHub Release through `gtd update`.
 
 ## Invariants and boundaries
 
@@ -37,6 +39,10 @@ to the Todoist application.
 - Project matching for `--project` is case-insensitive and exact.
 - Missing project or section metadata must not prevent the remaining tasks from
   being displayed.
+- Self-update downloads only the named Apple Silicon release archive and its
+  checksum from the public `RoTorEx/gtd` GitHub repository, verifies SHA-256,
+  verifies the extracted binary through `gtd -V`, and atomically replaces the
+  current executable.
 
 ## Decision-bearing constants
 
@@ -52,10 +58,12 @@ to the Todoist application.
 - Replacing Todoist as the system of record.
 - Creating or editing task content.
 - Persisting task data or credentials locally.
+- Supporting prebuilt self-update assets on non-Apple-Silicon platforms.
 
 ## Code map
 
 - `src/main.rs` — CLI parsing, Todoist API access, grouping, rendering, and task
   actions.
+- `src/update.rs` — verified Apple Silicon GitHub Release self-update.
 - `Makefile` — stable build, verification, installation, and release commands.
 - `.github/workflows/release.yml` — tagged release artifact publication.

@@ -34,7 +34,12 @@ gtd --plain
 ```
 
 Check the running binary with `gtd --version` or the source checkout with
-`make version`.
+`make version`. Once installed, update it from the latest Apple Silicon GitHub
+Release with:
+
+```bash
+gtd update
+```
 
 ## Interactive controls
 

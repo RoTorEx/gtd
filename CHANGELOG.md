@@ -4,6 +4,12 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Add `gtd update` to download the latest Apple Silicon release, verify its
+  SHA-256 checksum and version command, and atomically replace the installed
+  executable.
+
 ### Changed
 
 - Limit release artifacts to Apple Silicon macOS, matching the machine this
