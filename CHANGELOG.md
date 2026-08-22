@@ -22,3 +22,8 @@ Tracks real product and release progress.
   CLI's runtime directory.
 - Made `make check` read-only and removed placeholder release targets until the
   project has a real versioned delivery process.
+
+### Fixed
+
+- Use the rustls-only Reqwest configuration so Linux aarch64 release builds do
+  not require a target-specific OpenSSL installation.
