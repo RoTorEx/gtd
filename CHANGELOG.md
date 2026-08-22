@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Changed
+
+- Keep the project and section of the first visible task pinned above the
+  scrolling task list.
+
 ## [0.2.6] - 2026-08-22
 
 ### Added

@@ -645,6 +645,13 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         .title(theme.tasks_title.as_str())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.list_border));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
 
     let now = Utc::now();
     let selected_entry_idx = app.selectable.get(app.selected).copied();
@@ -717,7 +724,6 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(block)
         .highlight_symbol("")
         .highlight_style(
             Style::default()
@@ -729,7 +735,44 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(selected_entry_idx);
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, chunks[1], &mut list_state);
+
+    let context = visible_group_context(&app.entries, list_state.offset())
+        .map(|(project, section)| {
+            Line::from(vec![
+                Span::styled(
+                    theme.project_icon.as_str(),
+                    Style::default().fg(theme.project_icon_color),
+                ),
+                Span::styled(
+                    project,
+                    Style::default()
+                        .fg(theme.project)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    theme.section_icon.trim(),
+                    Style::default().fg(theme.section_icon_color),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(
+                    section,
+                    Style::default()
+                        .fg(theme.section)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ])
+        })
+        .unwrap_or_default();
+    frame.render_widget(Paragraph::new(context), chunks[0]);
+}
+
+fn visible_group_context(entries: &[ListEntry], offset: usize) -> Option<(&str, &str)> {
+    entries.iter().skip(offset).find_map(|entry| match entry {
+        ListEntry::Task(item) => Some((item.project_name.as_str(), item.section_name.as_str())),
+        _ => None,
+    })
 }
 
 fn pad_width(text: &str, width: usize) -> String {
@@ -1404,6 +1447,26 @@ mod tests {
         assert!(matches!(app.entries[5], ListEntry::Task(_)));
         assert!(matches!(app.entries[6], ListEntry::Spacer));
         assert!(matches!(app.entries[7], ListEntry::ProjectHeader(_)));
+    }
+
+    #[test]
+    fn keeps_group_context_for_tasks_scrolled_past_their_headers() {
+        let item = TaskItem {
+            task: test_task("1", ""),
+            project_name: "Work".to_string(),
+            section_name: "Latenode".to_string(),
+            section_order: 1,
+        };
+        let entries = vec![
+            ListEntry::ProjectHeader("Work".to_string()),
+            ListEntry::SectionHeader("Latenode".to_string()),
+            ListEntry::Task(Box::new(item)),
+        ];
+
+        assert_eq!(
+            visible_group_context(&entries, 2),
+            Some(("Work", "Latenode"))
+        );
     }
 
     fn test_task(id: &str, url: &str) -> Task {

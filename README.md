@@ -59,6 +59,8 @@ gtd update
 The left pane shows each task's title plus up to 30 characters of its
 description. The right pane shows the full description, project, section, age,
 due date, priority, labels, comments, URL, and ID.
+The project and section of the first visible task stay pinned at the top of the
+left pane while the list scrolls.
 
 ## Themes
 
