@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Changed
+
+- Routed direct Cargo and IDE build output to
+  `~/construction_side/gtd/target`.
+
 ## [0.2.9] - 2026-08-22
 
 ### Fixed
