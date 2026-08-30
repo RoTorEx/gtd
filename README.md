@@ -120,7 +120,6 @@ make vibe-pull
 
 - `AGENTS.md` — agent router.
 - `BUSINESS.md` — product purpose, flows, and boundaries.
-- `TASK.md` — task queue (agents process and remove completed tasks).
 - `CHANGELOG.md` — release progress.
 - `config.example.toml` — default user configuration and available theme names.
 - `themes/*.toml` — one bundled palette and symbol definition per theme.
