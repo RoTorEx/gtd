@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-09-05
+
 ### Fixed
 
 - Include overdue tasks in `--today` and show current due dates/times instead
