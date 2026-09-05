@@ -38,7 +38,7 @@ struct Args {
     #[arg(long)]
     plain: bool,
 
-    /// Show only tasks due today in the local timezone (excluding overdue tasks)
+    /// Show tasks due today or overdue in the local timezone
     #[arg(long)]
     today: bool,
 
@@ -58,7 +58,11 @@ impl TaskFilter {
             .as_ref()
             .is_none_or(|project| project_name.eq_ignore_ascii_case(project))
             && (!self.today
-                || task.due.as_ref().and_then(|due| due.local_date(&Local)) == Some(today))
+                || task
+                    .due
+                    .as_ref()
+                    .and_then(|due| due.local_date(&Local))
+                    .is_some_and(|date| date <= today))
     }
 }
 
@@ -80,6 +84,7 @@ enum Command {
 #[derive(Deserialize, Debug)]
 struct PaginatedResponse<T> {
     results: Vec<T>,
+    next_cursor: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -130,6 +135,35 @@ struct Due {
 }
 
 impl Due {
+    fn label(&self, now: DateTime<Local>) -> Option<(String, i64)> {
+        let date = self.local_date(&Local)?;
+        let days = now.date_naive().signed_duration_since(date).num_days();
+        let mut label = match days {
+            0 => "Today".to_string(),
+            1 => "Yesterday".to_string(),
+            _ => date.format("%Y-%m-%d").to_string(),
+        };
+        let raw = self.datetime.as_deref().or(self.date.as_deref())?;
+        let time = DateTime::parse_from_rfc3339(raw)
+            .map(|dt| dt.with_timezone(&Local).format("%H:%M").to_string())
+            .ok()
+            .or_else(|| {
+                NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f")
+                    .ok()
+                    .map(|dt| dt.format("%H:%M").to_string())
+            });
+        if let Some(time) = time {
+            label.push_str(&format!(" {time}"));
+        }
+        if days > 0 {
+            label.push_str(" (overdue)");
+        }
+        if self.is_recurring {
+            label.push_str(" ↻");
+        }
+        Some((label, days))
+    }
+
     fn local_date<Tz: TimeZone>(&self, timezone: &Tz) -> Option<NaiveDate> {
         let raw = self.datetime.as_deref().or(self.date.as_deref())?;
         if let Ok(datetime) = DateTime::parse_from_rfc3339(raw) {
@@ -141,6 +175,22 @@ impl Due {
             .or_else(|_| NaiveDate::parse_from_str(raw, "%Y-%m-%d"))
             .ok()
     }
+}
+
+fn task_timing(task: &Task, today_mode: bool, now: DateTime<Utc>) -> (String, i64) {
+    if today_mode {
+        return task
+            .due
+            .as_ref()
+            .and_then(|due| due.label(now.with_timezone(&Local)))
+            .unwrap_or_else(|| ("?".to_string(), 0));
+    }
+    parse_datetime(&task.added_at)
+        .map(|added| {
+            let age = now.signed_duration_since(added);
+            (format_age(age), age.num_days())
+        })
+        .unwrap_or_else(|_| ("?".to_string(), 0))
 }
 
 #[derive(Clone, Debug)]
@@ -277,18 +327,16 @@ impl App {
                 .then(a.task.added_at.cmp(&b.task.added_at))
         });
 
-        // Pre-compute max age width across all tasks.
-        let mut max_age = 0;
-        for item in &items {
-            if let Ok(added) = parse_datetime(&item.task.added_at) {
-                let age = format_age(now.signed_duration_since(added));
-                let age_len = age.chars().count();
-                if age_len > max_age {
-                    max_age = age_len;
-                }
-            }
-        }
-        self.max_age = max_age;
+        self.max_age = items
+            .iter()
+            .map(|item| {
+                task_timing(&item.task, self.filter.today, now)
+                    .0
+                    .chars()
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
 
         // Build grouped entries with headers.
         let mut entries: Vec<ListEntry> = Vec::new();
@@ -746,19 +794,20 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         format!(" | {desc}")
                     };
 
-                    let age = parse_datetime(&item.task.added_at)
-                        .map(|dt| format_age(now.signed_duration_since(dt)))
-                        .unwrap_or_else(|_| "?".to_string());
-                    let days = parse_datetime(&item.task.added_at)
-                        .map(|dt| now.signed_duration_since(dt).num_days())
-                        .unwrap_or(0);
-
+                    let (age, days) = task_timing(&item.task, app.filter.today, now);
                     let age_padded = pad_width(&age, app.max_age);
-
-                    let age_color = match days {
-                        ..7 => theme.age_fresh,
-                        7..30 => theme.age_aging,
-                        _ => theme.age_old,
+                    let age_color = if app.filter.today {
+                        if days > 0 {
+                            theme.age_old
+                        } else {
+                            theme.age_fresh
+                        }
+                    } else {
+                        match days {
+                            ..7 => theme.age_fresh,
+                            7..30 => theme.age_aging,
+                            _ => theme.age_old,
+                        }
                     };
 
                     Line::from(vec![
@@ -1018,18 +1067,29 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             Span::styled("Section: ", Style::default().fg(theme.label)),
             Span::raw(&item.section_name),
         ]));
-        lines.push(Line::from(vec![
-            Span::styled("Added: ", Style::default().fg(theme.label)),
-            Span::raw(format!("{added} ({age})")),
-        ]));
+        if !app.filter.today {
+            lines.push(Line::from(vec![
+                Span::styled("Added: ", Style::default().fg(theme.label)),
+                Span::raw(format!("{added} ({age})")),
+            ]));
+        }
 
         if let Some(due) = &task.due {
-            let due_str = due
-                .datetime
-                .clone()
-                .or_else(|| due.date.clone())
-                .unwrap_or_else(|| due.string.clone());
-            let recurring = if due.is_recurring { " (recurring)" } else { "" };
+            let due_str = if app.filter.today {
+                due.label(Local::now())
+                    .map(|(label, _)| label)
+                    .unwrap_or_else(|| "?".into())
+            } else {
+                due.datetime
+                    .clone()
+                    .or_else(|| due.date.clone())
+                    .unwrap_or_else(|| due.string.clone())
+            };
+            let recurring = if due.is_recurring && !app.filter.today {
+                " (recurring)"
+            } else {
+                ""
+            };
             lines.push(Line::from(vec![
                 Span::styled("Due: ", Style::default().fg(theme.label)),
                 Span::raw(format!("{due_str}{recurring}")),
@@ -1254,18 +1314,26 @@ fn print_plain_list(
             let rows: Result<Vec<TaskRow>> = section_tasks
                 .iter()
                 .map(|task| {
-                    let added = parse_datetime(&task.added_at)?;
-                    let age = now.signed_duration_since(added);
-                    Ok(TaskRow {
-                        id: task.id.clone(),
-                        age: format_age(age),
-                        added: added
+                    let (age, days) = task_timing(task, filter.today, now);
+                    let date = if filter.today {
+                        task.due
+                            .as_ref()
+                            .and_then(|due| due.local_date(&Local))
+                            .map(|date| date.to_string())
+                            .unwrap_or_default()
+                    } else {
+                        parse_datetime(&task.added_at)?
                             .with_timezone(&Local)
                             .format("%Y-%m-%d %H:%M")
-                            .to_string(),
+                            .to_string()
+                    };
+                    Ok(TaskRow {
+                        id: task.id.clone(),
+                        age,
+                        added: date,
                         content: strip_markdown_links(&task.content),
                         description: truncate_description_preview(&task.description),
-                        days: age.num_days(),
+                        days,
                     })
                 })
                 .collect();
@@ -1279,10 +1347,18 @@ fn print_plain_list(
                 let id_padded = format!("{:<width$}", row.id.dimmed(), width = max_id);
                 let age_padded = format!("{:<width$}", row.age, width = max_age);
                 let date_padded = format!("{:<width$}", row.added, width = max_date);
-                let age_colored = match row.days {
-                    ..7 => age_padded.green(),
-                    7..30 => age_padded.yellow(),
-                    _ => age_padded.red(),
+                let age_colored = if filter.today {
+                    if row.days > 0 {
+                        age_padded.red()
+                    } else {
+                        age_padded.green()
+                    }
+                } else {
+                    match row.days {
+                        ..7 => age_padded.green(),
+                        7..30 => age_padded.yellow(),
+                        _ => age_padded.red(),
+                    }
                 };
                 let desc_part = if row.description.is_empty() {
                     String::new()
@@ -1414,42 +1490,42 @@ fn truncate_text(text: &str, max: usize) -> String {
 }
 
 async fn fetch_sections(client: &reqwest::Client, token: &str) -> Result<Vec<Section>> {
-    let response: PaginatedResponse<Section> = client
-        .get(format!("{}/sections", TODOIST_API))
-        .bearer_auth(token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("failed to parse sections response")?;
-    Ok(response.results)
+    fetch_pages(client, token, &format!("{TODOIST_API}/sections")).await
 }
 
 async fn fetch_projects(client: &reqwest::Client, token: &str) -> Result<Vec<Project>> {
-    let response: PaginatedResponse<Project> = client
-        .get(format!("{}/projects", TODOIST_API))
-        .bearer_auth(token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("failed to parse projects response")?;
-    Ok(response.results)
+    fetch_pages(client, token, &format!("{TODOIST_API}/projects")).await
 }
 
 async fn fetch_tasks(client: &reqwest::Client, token: &str) -> Result<Vec<Task>> {
-    let response: PaginatedResponse<Task> = client
-        .get(format!("{}/tasks", TODOIST_API))
-        .bearer_auth(token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("failed to parse tasks response")?;
-    Ok(response.results)
+    fetch_pages(client, token, &format!("{TODOIST_API}/tasks")).await
+}
+
+async fn fetch_pages<T: serde::de::DeserializeOwned>(
+    client: &reqwest::Client,
+    token: &str,
+    url: &str,
+) -> Result<Vec<T>> {
+    let mut results = Vec::new();
+    let mut cursor = None;
+    loop {
+        let mut request = client.get(url).bearer_auth(token);
+        if let Some(cursor) = &cursor {
+            request = request.query(&[("cursor", cursor)]);
+        }
+        let page: PaginatedResponse<T> = request
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .context("failed to parse paginated response")?;
+        results.extend(page.results);
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => return Ok(results),
+        }
+    }
 }
 
 fn parse_datetime(raw: &str) -> Result<DateTime<Utc>> {
@@ -1472,6 +1548,97 @@ fn format_age(dur: chrono::TimeDelta) -> String {
 mod tests {
     use super::*;
     use chrono::TimeDelta;
+
+    #[tokio::test]
+    async fn fetches_every_page_with_the_returned_cursor() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/tasks", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for (expected, body) in [
+                (
+                    "GET /tasks HTTP",
+                    r#"{"results":[1],"next_cursor":"page2"}"#,
+                ),
+                (
+                    "GET /tasks?cursor=page2 HTTP",
+                    r#"{"results":[2],"next_cursor":null}"#,
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = [0; 4096];
+                let count = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..count]).starts_with(expected));
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+        });
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let results: Vec<u32> = fetch_pages(&client, "test-token", &url).await.unwrap();
+        server.join().unwrap();
+        assert_eq!(results, vec![1, 2]);
+    }
+
+    #[test]
+    fn today_timing_uses_current_occurrence_instead_of_creation_age() {
+        let now = Local
+            .with_ymd_and_hms(2026, 9, 5, 16, 30, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut task = test_task("1", "");
+        task.added_at = "2020-01-01T00:00:00Z".into();
+        task.due = Some(due("2026-09-05", None));
+        task.due.as_mut().unwrap().is_recurring = true;
+        assert_eq!(task_timing(&task, true, now), ("Today ↻".into(), 0));
+        task.due = Some(due("2026-09-04T17:00:00", None));
+        assert_eq!(
+            task_timing(&task, true, now),
+            ("Yesterday 17:00 (overdue)".into(), 1)
+        );
+        task.due = Some(due("2026-08-22", None));
+        assert_eq!(
+            task_timing(&task, true, now),
+            ("2026-08-22 (overdue)".into(), 14)
+        );
+        assert!(task_timing(&task, false, now).1 > 2000);
+    }
+
+    #[test]
+    fn today_view_renders_due_label_and_hides_creation_age() {
+        let mut task = test_task("1", "");
+        task.added_at = "2020-01-01T00:00:00Z".into();
+        task.due = Some(due(&Local::now().date_naive().to_string(), None));
+        let mut app = App::new(
+            reqwest::Client::new(),
+            String::new(),
+            TaskFilter {
+                project: None,
+                today: true,
+            },
+            Vec::new(),
+            Vec::new(),
+            vec![task],
+            theme::get("classic").unwrap(),
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Today"));
+        assert!(rendered.contains("Due: Today"));
+        assert!(!rendered.contains("Added:"));
+        assert!(!rendered.contains("2020-01-01"));
+    }
 
     #[test]
     fn today_combines_with_existing_display_options() {
@@ -1519,11 +1686,13 @@ mod tests {
         };
         let mut task = test_task("1", "");
         assert!(!filter.matches(&task, "Work", today));
-        for date in ["2026-09-04", "2026-09-06", "invalid"] {
+        for date in ["2026-09-06", "invalid"] {
             task.due = Some(due(date, None));
             assert!(!filter.matches(&task, "Work", today));
             assert!(TaskFilter::default().matches(&task, "Work", today));
         }
+        task.due = Some(due("2026-09-04", None));
+        assert!(filter.matches(&task, "Work", today));
         task.due = Some(due("2026-09-05", None));
         assert!(filter.matches(&task, "work", today));
         assert!(!filter.matches(&task, "Personal", today));

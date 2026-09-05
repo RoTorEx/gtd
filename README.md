@@ -33,7 +33,7 @@ gtd
 # 4. (Optional) Show only one project
 gtd --project "Work"
 
-# 5. (Optional) Show tasks due today
+# 5. (Optional) Show tasks due today and overdue
 gtd --today
 gtd --today --project "Work"
 
@@ -49,9 +49,11 @@ Release with:
 gtd update
 ```
 
-`--today` filters the usual view to tasks due on the current local calendar
-date, including recurring tasks. Overdue tasks and tasks without a due date are
-excluded. It also works with `--plain` and stays active when refreshing the TUI.
+`--today` shows today's workload, including overdue tasks, as in Todoist.
+It displays the current due date/time (Today, Yesterday, or a date), marks
+overdue dates and recurring tasks, and hides creation age in this mode.
+Future tasks and tasks without a due date are excluded. Dates use the local
+timezone. It works with `--plain` and stays active when refreshing the TUI.
 
 ## Interactive controls
 

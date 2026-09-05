@@ -23,7 +23,7 @@ to the Todoist application.
 ## Main flows
 
 1. Fetch active projects, sections, and tasks from Todoist over HTTPS.
-2. Optionally filter tasks by project name and/or due today with `--today`.
+2. Optionally filter tasks by project name and/or due today or overdue with `--today`.
 3. Group and order tasks by project, section, Todoist order, and creation time.
 4. Let the user inspect details, open the Todoist URL, refresh the list, complete
    a task, or delete a task.
@@ -44,12 +44,21 @@ to the Todoist application.
 - Exit key combinations must quit without triggering or confirming a task
   mutation.
 - Project matching for `--project` is case-insensitive and exact.
-- `--today` keeps tasks whose due date is the current local calendar date,
-  excluding overdue, future, undated, and invalid dates. Explicit timezone offsets
-  are converted to the system timezone; date-only and floating times use their
-  stated calendar date. Recurring tasks use their current due date. The filter
-  combines with `--project`, applies to both TUI and plain output, and is
-  reevaluated on refresh. Grouping, ordering, styling, and actions stay the same.
+- `--today` means the Todoist Today workload: tasks due today plus all
+  overdue tasks. Future, undated, and invalid dates are excluded. Explicit
+  timezone offsets are converted to the system timezone; date-only and floating
+  times use their stated calendar date. Recurring tasks use their current
+  occurrence's due date, never the original creation timestamp.
+- In `--today`, the list and details show Today, Yesterday, or the due date,
+  including a due time and recurrence marker when present. Past dates are
+  marked overdue and use the theme's old/red cue; today's dates use the fresh
+  cue. Creation age is hidden in this mode. Plain output uses the same timing
+  labels and due dates. The regular view continues to show creation age.
+- The today filter combines with `--project`, applies to TUI and plain output,
+  and is reevaluated on refresh. Existing project/section grouping and actions
+  are preserved.
+- Fetch every API page for tasks, projects, and sections using `next_cursor`
+  until it is null, so filtering covers the complete active task list.
 - Missing project or section metadata must not prevent the remaining tasks from
   being displayed.
 - Self-update downloads only the named Apple Silicon release archive and its

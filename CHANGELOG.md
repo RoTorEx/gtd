@@ -4,6 +4,12 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Include overdue tasks in `--today` and show current due dates/times instead
+  of creation age, including for recurring tasks, in both TUI and plain output.
+- Fetch all task, project, and section pages so the Today view is complete.
+
 ## [0.2.10] - 2026-09-05
 
 ### Added
