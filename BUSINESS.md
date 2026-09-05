@@ -23,7 +23,7 @@ to the Todoist application.
 ## Main flows
 
 1. Fetch active projects, sections, and tasks from Todoist over HTTPS.
-2. Optionally filter tasks by project name.
+2. Optionally filter tasks by project name and/or due today with `--today`.
 3. Group and order tasks by project, section, Todoist order, and creation time.
 4. Let the user inspect details, open the Todoist URL, refresh the list, complete
    a task, or delete a task.
@@ -44,6 +44,12 @@ to the Todoist application.
 - Exit key combinations must quit without triggering or confirming a task
   mutation.
 - Project matching for `--project` is case-insensitive and exact.
+- `--today` keeps tasks whose due date is the current local calendar date,
+  excluding overdue, future, undated, and invalid dates. Explicit timezone offsets
+  are converted to the system timezone; date-only and floating times use their
+  stated calendar date. Recurring tasks use their current due date. The filter
+  combines with `--project`, applies to both TUI and plain output, and is
+  reevaluated on refresh. Grouping, ordering, styling, and actions stay the same.
 - Missing project or section metadata must not prevent the remaining tasks from
   being displayed.
 - Self-update downloads only the named Apple Silicon release archive and its

@@ -33,7 +33,11 @@ gtd
 # 4. (Optional) Show only one project
 gtd --project "Work"
 
-# 5. (Optional) Print the plain grouped list instead of opening the TUI
+# 5. (Optional) Show tasks due today
+gtd --today
+gtd --today --project "Work"
+
+# 6. (Optional) Print the plain grouped list instead of opening the TUI
 gtd --plain
 ```
 
@@ -44,6 +48,10 @@ Release with:
 ```bash
 gtd update
 ```
+
+`--today` filters the usual view to tasks due on the current local calendar
+date, including recurring tasks. Overdue tasks and tasks without a due date are
+excluded. It also works with `--plain` and stays active when refreshing the TUI.
 
 ## Interactive controls
 

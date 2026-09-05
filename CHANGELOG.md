@@ -4,6 +4,11 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Add `gtd --today` to review tasks due today in the usual TUI or plain listing,
+  with project filtering and refresh support.
+
 ### Changed
 
 - Routed direct Cargo and IDE build output to

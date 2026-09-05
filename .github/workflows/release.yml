@@ -12,6 +12,8 @@ jobs:
   build:
     name: Build macOS aarch64 release binary
     runs-on: macos-15
+    env:
+      CARGO_TARGET_DIR: target
 
     steps:
       - name: Checkout

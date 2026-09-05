@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -38,8 +38,28 @@ struct Args {
     #[arg(long)]
     plain: bool,
 
+    /// Show only tasks due today in the local timezone (excluding overdue tasks)
+    #[arg(long)]
+    today: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Default)]
+struct TaskFilter {
+    project: Option<String>,
+    today: bool,
+}
+
+impl TaskFilter {
+    fn matches(&self, task: &Task, project_name: &str, today: NaiveDate) -> bool {
+        self.project
+            .as_ref()
+            .is_none_or(|project| project_name.eq_ignore_ascii_case(project))
+            && (!self.today
+                || task.due.as_ref().and_then(|due| due.local_date(&Local)) == Some(today))
+    }
 }
 
 #[derive(Subcommand)]
@@ -109,6 +129,20 @@ struct Due {
     is_recurring: bool,
 }
 
+impl Due {
+    fn local_date<Tz: TimeZone>(&self, timezone: &Tz) -> Option<NaiveDate> {
+        let raw = self.datetime.as_deref().or(self.date.as_deref())?;
+        if let Ok(datetime) = DateTime::parse_from_rfc3339(raw) {
+            return Some(datetime.with_timezone(timezone).date_naive());
+        }
+        // Floating due times belong to the local calendar, just like date-only tasks.
+        NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f")
+            .map(|datetime| datetime.date())
+            .or_else(|_| NaiveDate::parse_from_str(raw, "%Y-%m-%d"))
+            .ok()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TaskItem {
     task: Task,
@@ -153,7 +187,7 @@ struct Toast {
 struct App {
     client: reqwest::Client,
     token: String,
-    project_filter: Option<String>,
+    filter: TaskFilter,
     project_names: HashMap<String, String>,
     section_names: HashMap<String, (String, i64)>,
     entries: Vec<ListEntry>,
@@ -170,7 +204,7 @@ impl App {
     fn new(
         client: reqwest::Client,
         token: String,
-        project_filter: Option<String>,
+        filter: TaskFilter,
         projects: Vec<Project>,
         sections: Vec<Section>,
         tasks: Vec<Task>,
@@ -187,7 +221,7 @@ impl App {
         let mut app = Self {
             client,
             token,
-            project_filter,
+            filter,
             project_names,
             section_names,
             entries: Vec::new(),
@@ -205,6 +239,7 @@ impl App {
 
     fn set_tasks(&mut self, tasks: Vec<Task>) {
         let now = Utc::now();
+        let today = Local::now().date_naive();
         let mut items: Vec<TaskItem> = tasks
             .into_iter()
             .filter_map(|task| {
@@ -214,9 +249,7 @@ impl App {
                     .cloned()
                     .unwrap_or_else(|| "Unknown".to_string());
 
-                if let Some(filter) = &self.project_filter
-                    && !project_name.eq_ignore_ascii_case(filter)
-                {
+                if !self.filter.matches(&task, &project_name, today) {
                     return None;
                 }
 
@@ -385,8 +418,12 @@ async fn main() -> Result<()> {
         fetch_tasks(&client, &token),
     )?;
 
+    let filter = TaskFilter {
+        project: args.project,
+        today: args.today,
+    };
     if args.plain {
-        print_plain_list(&projects, &sections, &tasks, args.project.as_deref())
+        print_plain_list(&projects, &sections, &tasks, &filter)
     } else {
         run_interactive(
             client,
@@ -394,7 +431,7 @@ async fn main() -> Result<()> {
             projects,
             sections,
             tasks,
-            args.project,
+            filter,
             active_theme.expect("interactive mode always loads a theme"),
         )
         .await
@@ -407,13 +444,13 @@ async fn run_interactive(
     projects: Vec<Project>,
     sections: Vec<Section>,
     tasks: Vec<Task>,
-    project_filter: Option<String>,
+    filter: TaskFilter,
     theme: Theme,
 ) -> Result<()> {
     let mut app = App::new(
         client.clone(),
         token.clone(),
-        project_filter,
+        filter,
         projects,
         sections,
         tasks,
@@ -1134,7 +1171,7 @@ fn print_plain_list(
     projects: &[Project],
     sections: &[Section],
     tasks: &[Task],
-    project_filter: Option<&str>,
+    filter: &TaskFilter,
 ) -> Result<()> {
     let project_names: HashMap<String, String> = projects
         .iter()
@@ -1146,6 +1183,7 @@ fn print_plain_list(
         .map(|s| (s.id.clone(), (s.name.clone(), s.order)))
         .collect();
 
+    let today = Local::now().date_naive();
     let mut by_project: HashMap<String, Vec<&Task>> = HashMap::new();
     for task in tasks {
         let project_name = project_names
@@ -1153,9 +1191,7 @@ fn print_plain_list(
             .cloned()
             .unwrap_or_else(|| "Unknown".to_string());
 
-        if let Some(filter) = project_filter
-            && !project_name.eq_ignore_ascii_case(filter)
-        {
+        if !filter.matches(task, &project_name, today) {
             continue;
         }
 
@@ -1438,6 +1474,86 @@ mod tests {
     use chrono::TimeDelta;
 
     #[test]
+    fn today_combines_with_existing_display_options() {
+        let args =
+            Args::try_parse_from(["gtd", "--today", "--plain", "--project", "Work"]).unwrap();
+        assert!(args.today);
+        assert!(args.plain);
+        assert_eq!(args.project.as_deref(), Some("Work"));
+        assert!(!Args::try_parse_from(["gtd"]).unwrap().today);
+    }
+
+    fn due(date: &str, datetime: Option<&str>) -> Due {
+        Due {
+            date: Some(date.to_string()),
+            datetime: datetime.map(str::to_string),
+            string: String::new(),
+            is_recurring: false,
+        }
+    }
+
+    #[test]
+    fn due_dates_handle_local_calendar_and_timezone_boundaries() {
+        let timezone = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 9, 5).unwrap();
+        for value in ["2026-09-05", "2026-09-05T12:30:00", "2026-09-04T22:30:00Z"] {
+            assert_eq!(due(value, None).local_date(&timezone), Some(today));
+        }
+        assert_eq!(
+            due("2026-09-04", Some("2026-09-04T22:30:00Z")).local_date(&timezone),
+            Some(today)
+        );
+        assert_ne!(
+            due("2026-09-05T23:30:00Z", None).local_date(&timezone),
+            Some(today)
+        );
+        assert_eq!(due("invalid", None).local_date(&timezone), None);
+    }
+
+    #[test]
+    fn today_filter_excludes_other_dates_and_combines_with_project() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 5).unwrap();
+        let filter = TaskFilter {
+            project: Some("Work".into()),
+            today: true,
+        };
+        let mut task = test_task("1", "");
+        assert!(!filter.matches(&task, "Work", today));
+        for date in ["2026-09-04", "2026-09-06", "invalid"] {
+            task.due = Some(due(date, None));
+            assert!(!filter.matches(&task, "Work", today));
+            assert!(TaskFilter::default().matches(&task, "Work", today));
+        }
+        task.due = Some(due("2026-09-05", None));
+        assert!(filter.matches(&task, "work", today));
+        assert!(!filter.matches(&task, "Personal", today));
+        task.due.as_mut().unwrap().is_recurring = true;
+        assert!(filter.matches(&task, "Work", today));
+    }
+
+    #[test]
+    fn today_filter_survives_task_list_refresh() {
+        let mut task = test_task("1", "");
+        task.due = Some(due(&Local::now().date_naive().to_string(), None));
+        let mut app = App::new(
+            reqwest::Client::new(),
+            String::new(),
+            TaskFilter {
+                project: None,
+                today: true,
+            },
+            Vec::new(),
+            Vec::new(),
+            vec![task.clone(), test_task("2", "")],
+            theme::get("classic").unwrap(),
+        );
+        assert_eq!(app.selectable.len(), 1);
+        app.set_tasks(vec![test_task("3", ""), task]);
+        assert_eq!(app.selectable.len(), 1);
+        assert_eq!(app.selected_task().unwrap().task.id, "1");
+    }
+
+    #[test]
     fn strips_markdown_link_targets() {
         assert_eq!(
             strip_markdown_links("Read [the guide](https://example.com) today"),
@@ -1570,7 +1686,7 @@ mod tests {
         let app = App::new(
             reqwest::Client::new(),
             String::new(),
-            None,
+            TaskFilter::default(),
             projects,
             sections,
             vec![alpha_one, alpha_two, beta],
@@ -1642,7 +1758,7 @@ mod tests {
         let mut app = App::new(
             reqwest::Client::new(),
             String::new(),
-            None,
+            TaskFilter::default(),
             projects,
             Vec::new(),
             tasks,
