@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-09-05
+
 ### Added
 
 - Add `gtd --today` to review tasks due today in the usual TUI or plain listing,
