@@ -4,6 +4,16 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Animated request progress for completion, undo, deletion, and refresh, with
+  background requests that keep the TUI responsive and prevent duplicate actions.
+- Session-long completion feedback: completed rows stay checked and struck
+  through in their groups, retaining selection and surviving refresh until exit.
+- Undo the latest completion with `u` (including Russian-layout `г`), or reopen
+  a selected completed row with `c`. Recurring undo restores the original due
+  date and recurrence; failures preserve status and undo history for retry.
+
 ## [0.2.13] - 2026-10-13
 
 ### Changed

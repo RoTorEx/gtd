@@ -65,10 +65,25 @@ timezone. It works with `--plain` and stays active when refreshing the TUI.
 | `g` (or `п` on the Russian keyboard layout) | Search projects and sections and jump directly |
 | `Home` / `End` | Jump to first / last task |
 | `o` | Open selected task in browser |
-| `c` | Complete selected task (with confirmation) |
+| `c` | Complete selected task, or reopen a completed row (with confirmation) |
+| `u` (or `г` on the Russian keyboard layout) | Undo the latest completion in this session |
 | `d` | Delete selected task (with confirmation) |
 | `r` | Refresh the task list |
 | `q` / `Esc` / `Ctrl+C` | Quit |
+
+After confirming with `Y`, an animated indicator shows the current action while
+waiting for Todoist. It also appears during undo, deletion, and refresh. Further
+actions are blocked until the request finishes; quitting remains available.
+`N` cancels immediately without sending a request.
+
+Completed tasks stay in their group with a checkmark and struck-through text
+until you quit GTD, including after refresh. The selection stays on the completed
+row. Press `u` to undo the latest completion; repeat to undo earlier completions,
+or select a completed row and press `c` to reopen that specific task. Undo becomes
+available only after Todoist confirms completion; failed undo remains retryable.
+For recurring tasks, the completed occurrence stays visible during this session,
+and undo restores its original due date and repeat rule. After restarting GTD,
+the list shows Todoist's current active tasks. Deletion cannot be undone.
 
 The left pane shows each task's title plus up to 30 characters of its
 description. The right pane shows the full description, project, section, age,

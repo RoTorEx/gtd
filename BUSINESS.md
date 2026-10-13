@@ -28,7 +28,10 @@ to the Todoist application.
 4. Let the user inspect details, open the Todoist URL, refresh the list, complete
    a task, or delete a task.
 5. Require an explicit in-application confirmation before completing or deleting
-   a task.
+   a task. Keep completed tasks visibly checked and struck through until the
+   current TUI exits, so completion feels clear and reassuring. `u` undoes the
+   latest completion, repeatedly in reverse order; `c` on a completed row offers
+   confirmed reopening of that particular task.
 6. On Apple Silicon macOS, let the user replace the running installation with
    the latest published GitHub Release through `gtd update`.
 7. Let the user list bundled themes with `gtd themes` and atomically select one
@@ -40,7 +43,20 @@ to the Todoist application.
 - The Todoist token is read from the environment, used only for authenticated
   Todoist API requests, and is never persisted or printed.
 - Read-only display actions do not mutate Todoist data.
-- Completing and deleting tasks are the only Todoist mutations.
+- Completing, undoing a completion, and deleting tasks are the only Todoist mutations.
+- Completion feedback is session-only and survives refresh, filters, and other
+  mutations. Keep the original completed occurrence for recurring tasks rather
+  than showing its next occurrence in this session; the next launch fetches the
+  current active occurrence. Undo restores the original recurring due date and
+  recurrence through Todoist's Sync uncompletion command (`is_forward = 0`).
+  Ordinary tasks use the reopen endpoint. Failed mutations keep the local status
+  and undo history intact; refresh failures do not erase a successful mutation.
+  Deleting a completed row removes it from session history and cannot be undone.
+- After confirmation, Todoist requests run in the background while the TUI
+  redraws an animated indicator naming the action. Show progress for completion,
+  undo, deletion, and refresh. Block duplicate actions while a request is pending;
+  quitting remains available. `N` cancels immediately without a network request.
+  Apply completion/undo feedback only after a successful Todoist response.
 - Exit key combinations must quit without triggering or confirming a task
   mutation.
 - Project matching for `--project` is case-insensitive and exact.

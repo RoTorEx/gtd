@@ -129,6 +129,8 @@ struct Task {
 struct Due {
     date: Option<String>,
     datetime: Option<String>,
+    #[serde(default)]
+    timezone: Option<String>,
     string: String,
     #[serde(default)]
     is_recurring: bool,
@@ -213,6 +215,8 @@ enum ListEntry {
 enum ConfirmAction {
     Complete(String),
     Delete(String),
+    Reopen(String),
+    Refresh,
 }
 
 #[derive(Clone, Debug)]
@@ -247,9 +251,28 @@ struct JumpMenu {
     selected: usize,
 }
 
+struct PendingRequest {
+    action: ConfirmAction,
+    handle: tokio::task::JoinHandle<Result<Option<Vec<Task>>>>,
+    started_at: Instant,
+}
+
+impl PendingRequest {
+    fn label(&self) -> &'static str {
+        match self.action {
+            ConfirmAction::Complete(_) => "Completing task",
+            ConfirmAction::Reopen(_) => "Undoing completion",
+            ConfirmAction::Delete(_) => "Deleting task",
+            ConfirmAction::Refresh => "Refreshing tasks",
+        }
+    }
+}
+
 struct App {
     client: reqwest::Client,
     token: String,
+    api_url: String,
+    pending: Option<PendingRequest>,
     filter: TaskFilter,
     project_names: HashMap<String, String>,
     section_names: HashMap<String, (String, i64)>,
@@ -258,6 +281,7 @@ struct App {
     selected: usize,
     list_offset: usize,
     max_age: usize,
+    completed: Vec<Task>,
     confirmation: Option<ConfirmState>,
     jump_menu: Option<JumpMenu>,
     toast: Option<Toast>,
@@ -285,6 +309,8 @@ impl App {
         let mut app = Self {
             client,
             token,
+            api_url: TODOIST_API.into(),
+            pending: None,
             filter,
             project_names,
             section_names,
@@ -293,6 +319,7 @@ impl App {
             selected: 0,
             list_offset: 0,
             max_age: 0,
+            completed: Vec::new(),
             confirmation: None,
             jump_menu: None,
             toast: None,
@@ -302,7 +329,11 @@ impl App {
         app
     }
 
-    fn set_tasks(&mut self, tasks: Vec<Task>) {
+    fn set_tasks(&mut self, mut tasks: Vec<Task>) {
+        let selected_id = self.selected_task().map(|item| item.task.id.clone());
+        // Retain the completed occurrence, even when a recurring task advances.
+        tasks.retain(|task| !self.is_completed(&task.id));
+        tasks.extend(self.completed.iter().cloned());
         let now = Utc::now();
         let today = Local::now().date_naive();
         let mut items: Vec<TaskItem> = tasks
@@ -314,7 +345,8 @@ impl App {
                     .cloned()
                     .unwrap_or_else(|| "Unknown".to_string());
 
-                if !self.filter.matches(&task, &project_name, today) {
+                if !self.is_completed(&task.id) && !self.filter.matches(&task, &project_name, today)
+                {
                     return None;
                 }
 
@@ -385,10 +417,35 @@ impl App {
 
         self.entries = entries;
         self.selectable = selectable;
-        self.list_offset = 0;
+        if let Some(id) = selected_id
+            && let Some(index) = self.selectable.iter().position(|&index| {
+                matches!(&self.entries[index], ListEntry::Task(item) if item.task.id == id)
+            })
+        {
+            self.selected = index;
+        }
         if self.selected >= self.selectable.len() && !self.selectable.is_empty() {
             self.selected = self.selectable.len() - 1;
         }
+    }
+
+    fn is_completed(&self, id: &str) -> bool {
+        self.completed.iter().any(|task| task.id == id)
+    }
+
+    fn remember_completion(&mut self, id: &str) {
+        if !self.is_completed(id)
+            && let Some(task) = self.entries.iter().find_map(|entry| match entry {
+                ListEntry::Task(item) if item.task.id == id => Some(item.task.clone()),
+                _ => None,
+            })
+        {
+            self.completed.push(task);
+        }
+    }
+
+    fn forget_completion(&mut self, id: &str) {
+        self.completed.retain(|task| task.id != id);
     }
 
     fn selected_task(&self) -> Option<&TaskItem> {
@@ -634,6 +691,7 @@ fn key_matches(key: &KeyEvent, latin: char) -> bool {
         'y' => 'н',
         'n' => 'т',
         'g' => 'п',
+        'u' => 'г',
         _ => return false,
     };
 
@@ -653,6 +711,7 @@ fn run_tui(app: &mut App) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
 
     loop {
+        finish_pending_request(app, &rt);
         app.clear_expired_toast();
         terminal.draw(|f| draw_ui(f, app))?;
 
@@ -677,6 +736,10 @@ fn run_tui(app: &mut App) -> Result<()> {
                 break;
             }
 
+            if app.pending.is_some() {
+                continue;
+            }
+
             if app.confirmation.is_some() {
                 handle_confirmation_key(app, &key, &rt)?;
                 continue;
@@ -691,12 +754,28 @@ fn run_tui(app: &mut App) -> Result<()> {
                 _ if key_matches(&key, 'c') => {
                     if let Some(item) = app.selected_task() {
                         app.confirmation = Some(ConfirmState {
-                            action: ConfirmAction::Complete(item.task.id.clone()),
+                            action: if app.is_completed(&item.task.id) {
+                                ConfirmAction::Reopen(item.task.id.clone())
+                            } else {
+                                ConfirmAction::Complete(item.task.id.clone())
+                            },
                             message: format!(
-                                "Complete task \"{}\"? [y/N]",
+                                "{} task \"{}\"? [y/N]",
+                                if app.is_completed(&item.task.id) {
+                                    "Reopen"
+                                } else {
+                                    "Complete"
+                                },
                                 truncate_text(&item.task.content, 40)
                             ),
                         });
+                    }
+                }
+                _ if key_matches(&key, 'u') => {
+                    if let Some(task) = app.completed.last().cloned() {
+                        start_request(app, &rt, ConfirmAction::Reopen(task.id));
+                    } else {
+                        app.show_info("No completion to undo in this session");
                     }
                 }
                 _ if key_matches(&key, 'd') => {
@@ -711,13 +790,8 @@ fn run_tui(app: &mut App) -> Result<()> {
                     }
                 }
                 _ if key_matches(&key, 'r') => {
-                    match rt.block_on(fetch_tasks(&app.client, &app.token)) {
-                        Ok(tasks) => {
-                            app.set_tasks(tasks);
-                            app.show_info("Refreshed tasks");
-                        }
-                        Err(e) => app.show_error(format!("Refresh failed: {e}")),
-                    }
+                    app.toast = None;
+                    start_request(app, &rt, ConfirmAction::Refresh);
                 }
                 _ if key_matches(&key, 'o') => {
                     if let Some(url) = app.selected_task().map(|item| task_browser_url(&item.task))
@@ -797,54 +871,106 @@ fn handle_confirmation_key(
     };
 
     if key_matches(key, 'y') {
-        match confirm.action {
-            ConfirmAction::Complete(id) => {
-                match rt.block_on(complete_task(&app.client, &app.token, &id)) {
-                    Ok(()) => {
-                        app.show_info(format!("Completed task {id}"));
-                        refresh_after_mutation(app, rt)?;
-                    }
-                    Err(e) => app.show_error(format!("Complete failed: {e}")),
-                }
-            }
-            ConfirmAction::Delete(id) => {
-                match rt.block_on(delete_task(&app.client, &app.token, &id, true)) {
-                    Ok(()) => {
-                        app.show_info(format!("Deleted task {id}"));
-                        refresh_after_mutation(app, rt)?;
-                    }
-                    Err(e) => app.show_error(format!("Delete failed: {e}")),
-                }
-            }
-        }
+        start_request(app, rt, confirm.action);
     } else {
         app.show_info("Cancelled");
     }
-
     Ok(())
 }
 
-fn refresh_after_mutation(app: &mut App, rt: &tokio::runtime::Runtime) -> Result<()> {
-    match rt.block_on(fetch_tasks(&app.client, &app.token)) {
-        Ok(tasks) => {
-            let prev_id = app.selected_task().map(|i| i.task.id.clone());
-            app.set_tasks(tasks);
-            if let Some(id) = prev_id {
-                if let Some(new_selected) = app
-                    .selectable
-                    .iter()
-                    .position(|&entry_idx| matches!(&app.entries[entry_idx], ListEntry::Task(item) if item.task.id == id))
-
-                {
-                    app.selected = new_selected;
-                } else if !app.selectable.is_empty() && app.selected >= app.selectable.len() {
-                    app.selected = app.selectable.len() - 1;
-                }
+fn start_request(app: &mut App, rt: &tokio::runtime::Runtime, action: ConfirmAction) {
+    if app.pending.is_some() {
+        return;
+    }
+    if !matches!(action, ConfirmAction::Refresh) {
+        app.toast = None;
+    }
+    let client = app.client.clone();
+    let token = app.token.clone();
+    let api = app.api_url.clone();
+    let task = match &action {
+        ConfirmAction::Reopen(id) => app.completed.iter().find(|task| &task.id == id).cloned(),
+        _ => None,
+    };
+    let request_action = action.clone();
+    let handle = rt.spawn(async move {
+        match request_action {
+            ConfirmAction::Complete(id) => complete_task(&client, &token, &id, &api).await?,
+            ConfirmAction::Reopen(_) => {
+                let task = task.context("No completion to undo in this session")?;
+                reopen_task_at(&client, &token, &task, &api).await?;
+            }
+            ConfirmAction::Delete(id) => delete_task(&client, &token, &id, &api).await?,
+            ConfirmAction::Refresh => {
+                return fetch_pages(&client, &token, &format!("{api}/tasks"))
+                    .await
+                    .map(Some);
             }
         }
-        Err(e) => app.show_error(format!("Refresh failed: {e}")),
+        Ok(None)
+    });
+    app.pending = Some(PendingRequest {
+        action,
+        handle,
+        started_at: Instant::now(),
+    });
+}
+
+fn finish_pending_request(app: &mut App, rt: &tokio::runtime::Runtime) {
+    if !app
+        .pending
+        .as_ref()
+        .is_some_and(|pending| pending.handle.is_finished())
+    {
+        return;
     }
-    Ok(())
+    let pending = app.pending.take().unwrap();
+    let label = pending.label();
+    match rt
+        .block_on(pending.handle)
+        .unwrap_or_else(|error| Err(error.into()))
+    {
+        Ok(Some(tasks)) => {
+            app.set_tasks(tasks);
+            let message = app
+                .toast
+                .as_ref()
+                .map(|toast| toast.message.clone())
+                .unwrap_or_else(|| "Refreshed tasks".into());
+            app.show_info(message);
+        }
+        Ok(None) => {
+            match pending.action {
+                ConfirmAction::Complete(id) => {
+                    app.remember_completion(&id);
+                    app.show_info("Completed — u to undo");
+                }
+                ConfirmAction::Reopen(id) => {
+                    app.forget_completion(&id);
+                    app.show_info("Completion undone");
+                }
+                ConfirmAction::Delete(id) => {
+                    app.forget_completion(&id);
+                    app.entries.retain(
+                        |entry| !matches!(entry, ListEntry::Task(item) if item.task.id == id),
+                    );
+                    app.selectable = app
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, entry)| {
+                            matches!(entry, ListEntry::Task(_)).then_some(index)
+                        })
+                        .collect();
+                    app.selected = app.selected.min(app.selectable.len().saturating_sub(1));
+                    app.show_info("Deleted task");
+                }
+                ConfirmAction::Refresh => {}
+            }
+            start_request(app, rt, ConfirmAction::Refresh);
+        }
+        Err(error) => app.show_error(format!("{label} failed: {error}")),
+    }
 }
 
 fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
@@ -864,7 +990,9 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
     draw_detail_pane(frame, app, body_chunks[1]);
     draw_status_bar(frame, app, main_chunks[1]);
 
-    if let Some(confirm) = &app.confirmation {
+    if let Some(pending) = &app.pending {
+        draw_pending_request(frame, app, pending, area);
+    } else if let Some(confirm) = &app.confirmation {
         draw_confirmation(frame, app, confirm, area);
     } else if let Some(menu) = &app.jump_menu {
         draw_jump_menu(frame, app, menu, area);
@@ -950,11 +1078,32 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         }
                     };
 
+                    let completed = app.is_completed(&item.task.id);
+                    let modifier = if completed {
+                        Modifier::CROSSED_OUT | Modifier::DIM
+                    } else {
+                        Modifier::empty()
+                    };
                     Line::from(vec![
-                        Span::styled(theme.task_icon.as_str(), Style::default().fg(theme.section)),
+                        Span::styled(
+                            if completed {
+                                "✓ "
+                            } else {
+                                theme.task_icon.as_str()
+                            },
+                            Style::default().fg(theme.section),
+                        ),
                         Span::styled(format!("{age_padded}  "), Style::default().fg(age_color)),
-                        Span::styled(content, Style::default().fg(theme.task)),
-                        Span::styled(desc_part, Style::default().fg(theme.description)),
+                        Span::styled(
+                            content,
+                            Style::default().fg(theme.task).add_modifier(modifier),
+                        ),
+                        Span::styled(
+                            desc_part,
+                            Style::default()
+                                .fg(theme.description)
+                                .add_modifier(modifier),
+                        ),
                     ])
                 }
             };
@@ -1186,6 +1335,14 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             Line::default(),
         ];
 
+        if app.is_completed(&task.id) {
+            lines.push(Line::from(Span::styled(
+                "✓ Completed this session — c to reopen, u to undo latest",
+                Style::default().fg(theme.age_fresh),
+            )));
+            lines.push(Line::default());
+        }
+
         if !task.description.is_empty() {
             lines.push(Line::from(vec![Span::styled(
                 "Description:\n",
@@ -1278,7 +1435,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             "↑↓/jk task {separator} ←→ section {separator} Shift+←→ project {separator} g jump {separator} Home/End"
         )),
         Line::from(format!(
-            "o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
+            "o open {separator} c complete/reopen {separator} u undo {separator} d delete {separator} r refresh {separator} q quit"
         )),
     ]);
     let help_widget = Paragraph::new(help)
@@ -1376,6 +1533,33 @@ fn draw_toast(frame: &mut ratatui::Frame, app: &App, toast: &Toast, area: Rect) 
     .alignment(Alignment::Center)
     .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, popup);
+}
+
+fn draw_pending_request(
+    frame: &mut ratatui::Frame,
+    app: &App,
+    pending: &PendingRequest,
+    area: Rect,
+) {
+    let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner = frames[(pending.started_at.elapsed().as_millis() / 100) as usize % frames.len()];
+    let popup = centered_rect(48.min(area.width), 5.min(area.height), area);
+    frame.render_widget(ClearWidget, popup);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(format!("{spinner} {}…", pending.label())),
+            Line::from("Waiting for Todoist"),
+            Line::from("q / Esc / Ctrl+C to quit"),
+        ])
+        .block(
+            Block::default()
+                .title("Working")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.confirm)),
+        )
+        .alignment(Alignment::Center),
+        popup,
+    );
 }
 
 fn draw_confirmation(frame: &mut ratatui::Frame, app: &App, confirm: &ConfirmState, area: Rect) {
@@ -1587,9 +1771,9 @@ fn print_plain_list(
     Ok(())
 }
 
-async fn complete_task(client: &reqwest::Client, token: &str, id: &str) -> Result<()> {
+async fn complete_task(client: &reqwest::Client, token: &str, id: &str, api: &str) -> Result<()> {
     client
-        .post(format!("{}/tasks/{}/close", TODOIST_API, id))
+        .post(format!("{api}/tasks/{id}/close"))
         .bearer_auth(token)
         .send()
         .await?
@@ -1598,20 +1782,66 @@ async fn complete_task(client: &reqwest::Client, token: &str, id: &str) -> Resul
     Ok(())
 }
 
-async fn delete_task(client: &reqwest::Client, token: &str, id: &str, yes: bool) -> Result<()> {
-    if !yes {
-        print!("Delete task {}? [y/N] ", id.yellow());
-        std::io::Write::flush(&mut std::io::stdout())?;
-        let mut answer = String::new();
-        std::io::stdin().read_line(&mut answer)?;
-        if !answer.trim().eq_ignore_ascii_case("y") {
-            println!("Cancelled");
-            return Ok(());
-        }
+fn recurring_undo_command(task: &Task, command_id: &str) -> serde_json::Value {
+    let due = task.due.as_ref().expect("recurring task has a due date");
+    let mut original_due = serde_json::json!({
+        "date": due.datetime.as_ref().or(due.date.as_ref()),
+        "string": due.string,
+        "is_recurring": true,
+    });
+    if let Some(timezone) = &due.timezone {
+        original_due["timezone"] = serde_json::json!(timezone);
     }
+    serde_json::json!({
+        "type": "item_update_date_complete",
+        "uuid": command_id,
+        "args": {
+            "id": task.id,
+            "is_forward": 0,
+            "due": original_due,
+        },
+    })
+}
 
+async fn reopen_task_at(
+    client: &reqwest::Client,
+    token: &str,
+    task: &Task,
+    api: &str,
+) -> Result<()> {
+    if task.due.as_ref().is_some_and(|due| due.is_recurring) {
+        // The Sync undo command restores both the occurrence and completion history.
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let commands = serde_json::json!([recurring_undo_command(task, &command_id)]);
+        let result: serde_json::Value = client
+            .post(format!("{api}/sync"))
+            .bearer_auth(token)
+            .form(&[("commands", commands.to_string())])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        anyhow::ensure!(
+            result["sync_status"][&command_id] == "ok",
+            "Todoist rejected recurring undo: {}",
+            result["sync_status"][&command_id]
+        );
+    } else {
+        client
+            .post(format!("{api}/tasks/{}/reopen", task.id))
+            .bearer_auth(token)
+            .send()
+            .await?
+            .error_for_status()
+            .context("failed to reopen task")?;
+    }
+    Ok(())
+}
+
+async fn delete_task(client: &reqwest::Client, token: &str, id: &str, api: &str) -> Result<()> {
     client
-        .delete(format!("{}/tasks/{}", TODOIST_API, id))
+        .delete(format!("{api}/tasks/{id}"))
         .bearer_auth(token)
         .send()
         .await?
@@ -1806,6 +2036,318 @@ mod tests {
             tasks,
             theme::get("classic").unwrap(),
         )
+    }
+
+    fn drain_pending(app: &mut App, rt: &tokio::runtime::Runtime) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.pending.is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "background request did not finish"
+            );
+            finish_pending_request(app, rt);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn confirmation_shows_loading_before_slow_api_and_keeps_undo_retryable() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (sent, received) = std::sync::mpsc::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for (index, (path, status, body)) in [
+                ("POST /tasks/0/close HTTP", "200 OK", "null"),
+                ("GET /tasks HTTP", "500 Internal Server Error", "null"),
+                ("POST /tasks/0/reopen HTTP", "500 Internal Server Error", "null"),
+                ("POST /tasks/0/reopen HTTP", "200 OK", "null"),
+                ("GET /tasks HTTP", "200 OK", r#"{"results":[{"id":"0","content":"Restored task","project_id":"a","section_id":null}],"next_cursor":null}"#),
+            ].into_iter().enumerate() {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0; 4096];
+                let count = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..count]).starts_with(path));
+                if index == 0 {
+                    sent.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut app = navigation_app();
+        app.api_url = url;
+        app.client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        app.confirmation = Some(ConfirmState {
+            action: ConfirmAction::Complete("0".into()),
+            message: "Complete?".into(),
+        });
+        handle_confirmation_key(
+            &mut app,
+            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+            &rt,
+        )
+        .unwrap();
+        assert!(app.pending.is_none());
+        assert!(app.completed.is_empty());
+        app.confirmation = Some(ConfirmState {
+            action: ConfirmAction::Complete("0".into()),
+            message: "Complete?".into(),
+        });
+        handle_confirmation_key(
+            &mut app,
+            &KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            &rt,
+        )
+        .unwrap();
+        received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(app.confirmation.is_none());
+        assert!(app.pending.is_some());
+        assert!(!app.is_completed("0"));
+        // Repeated actions during a request must not send duplicate mutations.
+        start_request(&mut app, &rt, ConfirmAction::Complete("0".into()));
+        for (width, height) in [(120, 24), (30, 8)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(rendered.contains("Waiting for Todoist"));
+        }
+        assert!(is_quit_key(&KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE
+        )));
+        release.send(()).unwrap();
+        drain_pending(&mut app, &rt);
+        assert!(app.is_completed("0"));
+        assert_eq!(app.selected_task().unwrap().task.id, "0");
+        assert_eq!(app.toast.as_ref().unwrap().kind, ToastKind::Error);
+        start_request(&mut app, &rt, ConfirmAction::Reopen("0".into()));
+        drain_pending(&mut app, &rt);
+        assert!(app.is_completed("0"));
+        assert_eq!(app.completed.last().unwrap().id, "0");
+        start_request(&mut app, &rt, ConfirmAction::Reopen("0".into()));
+        drain_pending(&mut app, &rt);
+        assert!(!app.is_completed("0"));
+        assert!(app.completed.is_empty());
+        assert_eq!(app.selected_task().unwrap().task.content, "Restored task");
+        assert_eq!(app.toast.as_ref().unwrap().message, "Completion undone");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn completion_survives_refresh_without_moving_selection_and_undo_is_lifo() {
+        let mut app = navigation_app();
+        app.selected = 2;
+        let original = app.selected_task().unwrap().task.clone();
+        app.remember_completion(&original.id);
+        app.remember_completion(&original.id);
+        app.set_tasks(Vec::new());
+        assert_eq!(app.selectable.len(), 1);
+        assert_eq!(app.selected_task().unwrap().task.id, original.id);
+        assert!(app.is_completed(&original.id));
+        app.set_tasks(vec![original.clone()]);
+        assert_eq!(app.selectable.len(), 1);
+        assert_eq!(app.completed.len(), 1);
+        assert!(navigation_app().completed.is_empty());
+
+        let mut app = navigation_app();
+        app.remember_completion("0");
+        app.remember_completion("2");
+        app.forget_completion("2");
+        assert_eq!(app.completed.last().unwrap().id, "0");
+        assert!(!app.is_completed("2"));
+        // A failed refresh after successful undo must still remove the strikeout.
+        assert!(
+            app.entries
+                .iter()
+                .any(|entry| { matches!(entry, ListEntry::Task(item) if item.task.id == "2") })
+        );
+    }
+
+    #[test]
+    fn completed_occurrence_stays_visible_in_today_even_after_recurring_advances() {
+        let mut app = navigation_app();
+        let mut task = app.selected_task().unwrap().task.clone();
+        let today = Local::now().date_naive();
+        task.due = Some(Due {
+            date: Some(today.to_string()),
+            datetime: None,
+            timezone: None,
+            string: "every day".into(),
+            is_recurring: true,
+        });
+        app.filter.today = true;
+        app.set_tasks(vec![task.clone()]);
+        app.remember_completion(&task.id);
+        task.due.as_mut().unwrap().date = Some((today + TimeDelta::days(1)).to_string());
+        app.set_tasks(vec![task.clone()]);
+        assert_eq!(app.selectable.len(), 1);
+        assert_eq!(
+            app.selected_task().unwrap().task.due.as_ref().unwrap().date,
+            Some(today.to_string())
+        );
+        app.forget_completion(&task.id);
+        app.set_tasks(vec![task]);
+        assert!(app.selectable.is_empty());
+    }
+
+    #[test]
+    fn completed_rows_render_struck_through_and_can_be_selected_in_every_theme() {
+        for name in ["classic", "forest", "sunset", "ocean", "midnight"] {
+            let mut app = navigation_app();
+            app.theme = theme::get(name).unwrap();
+            let mut task = app.selected_task().unwrap().task.clone();
+            task.content = "Finished task".into();
+            app.set_tasks(vec![task]);
+            app.remember_completion("0");
+            app.set_tasks(Vec::new());
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(150, 24)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains("✓"));
+            assert!(text.contains("Completed this session"));
+            assert!(buffer.content.iter().any(|cell| {
+                cell.symbol() == "F" && cell.modifier.contains(Modifier::CROSSED_OUT)
+            }));
+            app.forget_completion("0");
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            assert!(
+                !terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .any(|cell| { cell.modifier.contains(Modifier::CROSSED_OUT) })
+            );
+        }
+    }
+
+    fn undo_server(recurring: bool, success: bool) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                bytes.extend_from_slice(&chunk[..count]);
+                if let Some(header_end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..header_end]).to_lowercase();
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("content-length: ")
+                                .map(|v| v.parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= header_end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            assert!(
+                request
+                    .to_lowercase()
+                    .contains("authorization: bearer test-token")
+            );
+            let (status, body) = if recurring {
+                assert!(request.starts_with("POST /sync HTTP"));
+                let encoded = request
+                    .split("\r\n\r\n")
+                    .nth(1)
+                    .unwrap()
+                    .strip_prefix("commands=")
+                    .unwrap();
+                let mut decoded = Vec::new();
+                let mut chars = encoded.as_bytes().iter().copied();
+                while let Some(c) = chars.next() {
+                    decoded.push(if c == b'%' {
+                        let hex = [chars.next().unwrap(), chars.next().unwrap()];
+                        u8::from_str_radix(std::str::from_utf8(&hex).unwrap(), 16).unwrap()
+                    } else if c == b'+' {
+                        b' '
+                    } else {
+                        c
+                    });
+                }
+                let commands: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+                assert_eq!(commands[0]["type"], "item_update_date_complete");
+                assert_eq!(commands[0]["args"]["id"], "undo-task");
+                assert_eq!(commands[0]["args"]["is_forward"], 0);
+                assert_eq!(
+                    commands[0]["args"]["due"]["date"],
+                    "2026-10-13T15:00:00+02:00"
+                );
+                assert_eq!(commands[0]["args"]["due"]["string"], "every day at 15:00");
+                assert_eq!(commands[0]["args"]["due"]["timezone"], "Europe/Warsaw");
+                let id = commands[0]["uuid"].as_str().unwrap();
+                assert!(uuid::Uuid::parse_str(id).is_ok());
+                let result = if success {
+                    serde_json::json!("ok")
+                } else {
+                    serde_json::json!({"error": "Task not found", "error_code": 22})
+                };
+                (
+                    "200 OK",
+                    serde_json::json!({"sync_status": {id: result}}).to_string(),
+                )
+            } else {
+                assert!(request.starts_with("POST /tasks/undo-task/reopen HTTP"));
+                (
+                    if success { "200 OK" } else { "404 Not Found" },
+                    "null".into(),
+                )
+            };
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn undo_uses_todoist_contract_and_rejects_http_and_sync_failures() {
+        for recurring in [false, true] {
+            for success in [false, true] {
+                let (url, server) = undo_server(recurring, success);
+                let mut task = test_task("undo-task", "");
+                if recurring {
+                    task.due = Some(Due {
+                        date: Some("2026-10-13".into()),
+                        datetime: Some("2026-10-13T15:00:00+02:00".into()),
+                        timezone: Some("Europe/Warsaw".into()),
+                        string: "every day at 15:00".into(),
+                        is_recurring: true,
+                    });
+                }
+                let client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .unwrap();
+                let result = reopen_task_at(&client, "test-token", &task, &url).await;
+                server.join().unwrap();
+                assert_eq!(result.is_ok(), success);
+            }
+        }
     }
 
     #[test]
@@ -2064,6 +2606,7 @@ mod tests {
         Due {
             date: Some(date.to_string()),
             datetime: datetime.map(str::to_string),
+            timezone: None,
             string: String::new(),
             is_recurring: false,
         }
