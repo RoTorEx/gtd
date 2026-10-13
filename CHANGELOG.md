@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-10-13
+
 ### Added
 
 - Jump between projects with Cmd+Up/Down, between sections with Option+Up/Down,
