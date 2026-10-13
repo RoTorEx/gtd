@@ -4,6 +4,12 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Changed
+
+- Use left/right to jump between sections and Shift+left/right for projects,
+  so group navigation works with the existing iTerm2 profile without changing
+  terminal key bindings or keyboard reporting modes.
+
 ## [0.2.12] - 2026-10-13
 
 ### Added

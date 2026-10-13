@@ -2,13 +2,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    supports_keyboard_enhancement,
 };
 use crossterm::{ExecutableCommand, cursor};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -590,18 +586,10 @@ async fn run_interactive(
     );
 
     enable_raw_mode()?;
-    let mut guard = AltScreenGuard {
-        keyboard_enhanced: false,
-    };
+    let guard = AltScreenGuard;
     let mut stdout = stdout();
     stdout.execute(EnterAlternateScreen)?;
     stdout.execute(cursor::Hide)?;
-    if supports_keyboard_enhancement().unwrap_or(false) {
-        stdout.execute(PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
-        ))?;
-        guard.keyboard_enhanced = true;
-    }
 
     let result = tokio::task::block_in_place(|| run_tui(&mut app));
 
@@ -609,16 +597,11 @@ async fn run_interactive(
     result
 }
 
-struct AltScreenGuard {
-    keyboard_enhanced: bool,
-}
+struct AltScreenGuard;
 
 impl Drop for AltScreenGuard {
     fn drop(&mut self) {
         let mut stdout = stdout();
-        if self.keyboard_enhanced {
-            let _ = stdout.execute(PopKeyboardEnhancementFlags);
-        }
         let _ = stdout.execute(cursor::Show);
         let _ = stdout.execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
@@ -755,11 +738,11 @@ fn run_tui(app: &mut App) -> Result<()> {
 
 fn handle_navigation_key(app: &mut App, key: &KeyEvent) -> bool {
     match (key.code, key.modifiers) {
-        (KeyCode::Up | KeyCode::Down, KeyModifiers::ALT) => {
-            app.jump_group(false, key.code == KeyCode::Down);
+        (KeyCode::Left | KeyCode::Right, KeyModifiers::NONE) => {
+            app.jump_group(false, key.code == KeyCode::Right);
         }
-        (KeyCode::Up | KeyCode::Down, KeyModifiers::SUPER) => {
-            app.jump_group(true, key.code == KeyCode::Down);
+        (KeyCode::Left | KeyCode::Right, KeyModifiers::SHIFT) => {
+            app.jump_group(true, key.code == KeyCode::Right);
         }
         (KeyCode::Up, KeyModifiers::NONE) => app.move_selection(-1),
         (KeyCode::Down, KeyModifiers::NONE) => app.move_selection(1),
@@ -1292,7 +1275,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let separator = app.theme.help_separator.as_str();
     let help = Text::from(vec![
         Line::from(format!(
-            "↑↓/jk task {separator} ⌥↑↓ section {separator} ⌘↑↓ project {separator} g jump {separator} Home/End"
+            "↑↓/jk task {separator} ←→ section {separator} Shift+←→ project {separator} g jump {separator} Home/End"
         )),
         Line::from(format!(
             "o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
@@ -1826,16 +1809,16 @@ mod tests {
     }
 
     #[test]
-    fn modified_arrows_follow_the_macos_group_hierarchy() {
+    fn horizontal_arrows_jump_sections_and_shift_arrows_jump_projects() {
         let mut app = navigation_app();
         for (code, modifiers, expected) in [
             (KeyCode::Down, KeyModifiers::NONE, "1"),
-            (KeyCode::Down, KeyModifiers::ALT, "2"),
-            (KeyCode::Down, KeyModifiers::ALT, "4"),
-            (KeyCode::Down, KeyModifiers::SUPER, "5"),
-            (KeyCode::Up, KeyModifiers::SUPER, "0"),
-            (KeyCode::Down, KeyModifiers::ALT, "2"),
-            (KeyCode::Up, KeyModifiers::ALT, "0"),
+            (KeyCode::Right, KeyModifiers::NONE, "2"),
+            (KeyCode::Right, KeyModifiers::NONE, "4"),
+            (KeyCode::Right, KeyModifiers::SHIFT, "5"),
+            (KeyCode::Left, KeyModifiers::SHIFT, "0"),
+            (KeyCode::Right, KeyModifiers::NONE, "2"),
+            (KeyCode::Left, KeyModifiers::NONE, "0"),
             (KeyCode::End, KeyModifiers::NONE, "5"),
             (KeyCode::Home, KeyModifiers::NONE, "0"),
         ] {
@@ -1848,7 +1831,9 @@ mod tests {
         for (code, modifiers) in [
             (KeyCode::Down, KeyModifiers::CONTROL),
             (KeyCode::Down, KeyModifiers::ALT | KeyModifiers::SUPER),
-            (KeyCode::Right, KeyModifiers::NONE),
+            (KeyCode::Down, KeyModifiers::ALT),
+            (KeyCode::Down, KeyModifiers::SUPER),
+            (KeyCode::Right, KeyModifiers::CONTROL),
             (KeyCode::Tab, KeyModifiers::NONE),
         ] {
             assert!(!handle_navigation_key(

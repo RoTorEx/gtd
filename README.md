@@ -60,8 +60,8 @@ timezone. It works with `--plain` and stays active when refreshing the TUI.
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` or `k` / `j` | Move selection |
-| `Cmd+↑` / `Cmd+↓` | Jump to previous / next project (folder) |
-| `Option+↑` / `Option+↓` | Jump to previous / next section, across projects |
+| `Shift+←` / `Shift+→` | Jump to previous / next project (folder) |
+| `←` / `→` | Jump to previous / next section, across projects |
 | `g` (or `п` on the Russian keyboard layout) | Search projects and sections and jump directly |
 | `Home` / `End` | Jump to first / last task |
 | `o` | Open selected task in browser |
@@ -86,18 +86,9 @@ type part of a project or section name (case-insensitive), choose with `↑` / `
 and press `Enter`. Section paths include the project name to distinguish repeated
 names. `Esc` cancels without moving the task selection; `Ctrl+C` still quits.
 
-The terminal must forward modified arrows to the app. `gtd` enables the Kitty
-keyboard protocol when supported and restores the previous reporting mode on
-exit. On other platforms, Option is Alt and Cmd is Super.
-
-If iTerm2 consumes Cmd arrows or uses double-Escape Option arrows, add four
-mappings in Settings → Profiles → Keys → Key Mappings using **Send Escape
-Sequence**: Cmd+↑ sends `[1;9A`, Cmd+↓ sends `[1;9B`, Option+↑ sends `[1;3A`, and
-Option+↓ sends `[1;3B`. Replace existing mappings for those combinations. The
-double-Escape defaults are interpreted as Escape by the input library and can
-quit the app. These mappings affect that terminal profile; other key
-bindings remain unchanged. The `g` menu provides direct group navigation even
-when a terminal cannot forward Cmd.
+Group navigation uses standard arrow sequences, including iTerm2's default
+Shift+arrow mappings. It requires no terminal configuration changes and does
+not change keyboard reporting modes or terminal key bindings.
 
 ## Themes
 

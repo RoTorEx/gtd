@@ -85,13 +85,14 @@ to the Todoist application.
 - The task list leaves a blank row before a project or section that follows
   tasks, so group boundaries remain visually distinct.
 - Task navigation stops at the first and last tasks instead of wrapping around.
-- Navigation follows the user's macOS cursor-modifier hierarchy: Cmd+Up/Down
-  jumps to the first task of the previous/next project (folder); Option+Up/Down
-  does the same for sections across projects. Group navigation
+- Navigation uses horizontal arrows for groups: Left/Right jumps to the first
+  task of the previous/next section across projects; Shift+Left/Right does the
+  same for projects (folders). Group navigation
   stops at the boundaries without moving the selection. Home/End selects the
   first/last task.
-- Modified arrows must reach the app from the terminal. Enable enhanced keyboard
-  reporting when supported and restore its previous state on exit. Unrecognized
+- Navigation must work without changing the user's terminal behavior, profiles,
+  key bindings, or keyboard reporting modes. Cmd/Option arrows are not required,
+  because terminals may consume them or encode them incompatibly. Unrecognized
   modifier combinations must not fall back to moving one task.
 - The `g` jump menu offers projects and sections with tasks in the current
   filtered view, including `No section`. Case-insensitive substring search
