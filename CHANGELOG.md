@@ -4,6 +4,15 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Added
+
+- Jump between projects with Cmd+Up/Down, between sections with Option+Up/Down,
+  and to the first/last task with Home/End.
+- Searchable project/section jump menu on `g`, with full section paths,
+  current-view filtering, and Russian keyboard layout support.
+- Enable enhanced keyboard reporting on supported terminals for Command/Super
+  arrows, restoring the previous mode on exit; document iTerm2 key mappings.
+
 ## [0.2.11] - 2026-09-05
 
 ### Fixed

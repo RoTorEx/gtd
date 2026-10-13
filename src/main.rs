@@ -2,9 +2,13 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    supports_keyboard_enhancement,
 };
 use crossterm::{ExecutableCommand, cursor};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -234,6 +238,19 @@ struct Toast {
     expires_at: Instant,
 }
 
+#[derive(Clone, Debug)]
+struct JumpTarget {
+    label: String,
+    task_index: usize,
+    project: bool,
+}
+
+#[derive(Default)]
+struct JumpMenu {
+    query: String,
+    selected: usize,
+}
+
 struct App {
     client: reqwest::Client,
     token: String,
@@ -246,6 +263,7 @@ struct App {
     list_offset: usize,
     max_age: usize,
     confirmation: Option<ConfirmState>,
+    jump_menu: Option<JumpMenu>,
     toast: Option<Toast>,
     theme: Theme,
 }
@@ -280,6 +298,7 @@ impl App {
             list_offset: 0,
             max_age: 0,
             confirmation: None,
+            jump_menu: None,
             toast: None,
             theme,
         };
@@ -391,6 +410,71 @@ impl App {
             return;
         }
         self.selected = bounded_selection(self.selected, self.selectable.len(), delta);
+    }
+
+    fn jump_targets(&self) -> Vec<JumpTarget> {
+        let mut targets = Vec::new();
+        let mut previous: Option<&TaskItem> = None;
+        for (task_index, &entry_index) in self.selectable.iter().enumerate() {
+            let ListEntry::Task(item) = &self.entries[entry_index] else {
+                continue;
+            };
+            let new_project = previous.is_none_or(|p| p.project_name != item.project_name);
+            if new_project {
+                targets.push(JumpTarget {
+                    label: item.project_name.clone(),
+                    task_index,
+                    project: true,
+                });
+            }
+            if new_project || previous.is_none_or(|p| p.section_name != item.section_name) {
+                targets.push(JumpTarget {
+                    label: format!("{} / {}", item.project_name, item.section_name),
+                    task_index,
+                    project: false,
+                });
+            }
+            previous = Some(item);
+        }
+        targets
+    }
+
+    fn jump_group(&mut self, project: bool, forward: bool) {
+        let starts: Vec<usize> = self
+            .jump_targets()
+            .into_iter()
+            .filter(|target| target.project == project)
+            .map(|target| target.task_index)
+            .collect();
+        let current = starts
+            .partition_point(|&start| start <= self.selected)
+            .saturating_sub(1);
+        let next = bounded_selection(current, starts.len(), if forward { 1 } else { -1 });
+        if next != current
+            && let Some(&start) = starts.get(next)
+        {
+            self.selected = start;
+        }
+    }
+
+    fn open_jump_menu(&mut self) {
+        let selected = self
+            .jump_targets()
+            .iter()
+            .rposition(|target| target.task_index <= self.selected)
+            .unwrap_or(0);
+        self.jump_menu = Some(JumpMenu {
+            query: String::new(),
+            selected,
+        });
+    }
+
+    fn filtered_jump_targets(&self, query: &str) -> Vec<JumpTarget> {
+        let query = query.to_lowercase();
+        self.jump_targets()
+            .into_iter()
+            .filter(|target| target.label.to_lowercase().contains(&query))
+            .collect()
     }
 
     fn show_info(&mut self, message: impl Into<String>) {
@@ -506,24 +590,35 @@ async fn run_interactive(
     );
 
     enable_raw_mode()?;
+    let mut guard = AltScreenGuard {
+        keyboard_enhanced: false,
+    };
     let mut stdout = stdout();
     stdout.execute(EnterAlternateScreen)?;
     stdout.execute(cursor::Hide)?;
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        stdout.execute(PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+        ))?;
+        guard.keyboard_enhanced = true;
+    }
 
     let result = tokio::task::block_in_place(|| run_tui(&mut app));
 
-    let _ = stdout.execute(cursor::Show);
-    let _ = stdout.execute(LeaveAlternateScreen);
-    let _ = disable_raw_mode();
-
+    drop(guard);
     result
 }
 
-struct AltScreenGuard;
+struct AltScreenGuard {
+    keyboard_enhanced: bool,
+}
 
 impl Drop for AltScreenGuard {
     fn drop(&mut self) {
         let mut stdout = stdout();
+        if self.keyboard_enhanced {
+            let _ = stdout.execute(PopKeyboardEnhancementFlags);
+        }
         let _ = stdout.execute(cursor::Show);
         let _ = stdout.execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
@@ -555,6 +650,7 @@ fn key_matches(key: &KeyEvent, latin: char) -> bool {
         'j' => 'о',
         'y' => 'н',
         'n' => 'т',
+        'g' => 'п',
         _ => return false,
     };
 
@@ -568,7 +664,6 @@ fn is_quit_key(key: &KeyEvent) -> bool {
 }
 
 fn run_tui(app: &mut App) -> Result<()> {
-    let _guard = AltScreenGuard;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -585,6 +680,16 @@ fn run_tui(app: &mut App) -> Result<()> {
                 continue;
             }
 
+            // Text input owns ordinary letters (including q/c/d), and Esc closes
+            // the menu. Ctrl+C remains an unconditional exit.
+            if app.jump_menu.is_some()
+                && !(key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('c'))
+            {
+                handle_jump_key(app, &key);
+                continue;
+            }
+
             if is_quit_key(&key) {
                 break;
             }
@@ -594,13 +699,12 @@ fn run_tui(app: &mut App) -> Result<()> {
                 continue;
             }
 
+            if handle_navigation_key(app, &key) {
+                continue;
+            }
+
             match key.code {
-                _ if key_matches(&key, 'k') || matches!(key.code, KeyCode::Up) => {
-                    app.move_selection(-1)
-                }
-                _ if key_matches(&key, 'j') || matches!(key.code, KeyCode::Down) => {
-                    app.move_selection(1)
-                }
+                _ if key_matches(&key, 'g') => app.open_jump_menu(),
                 _ if key_matches(&key, 'c') => {
                     if let Some(item) = app.selected_task() {
                         app.confirmation = Some(ConfirmState {
@@ -647,6 +751,57 @@ fn run_tui(app: &mut App) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_navigation_key(app: &mut App, key: &KeyEvent) -> bool {
+    match (key.code, key.modifiers) {
+        (KeyCode::Up | KeyCode::Down, KeyModifiers::ALT) => {
+            app.jump_group(false, key.code == KeyCode::Down);
+        }
+        (KeyCode::Up | KeyCode::Down, KeyModifiers::SUPER) => {
+            app.jump_group(true, key.code == KeyCode::Down);
+        }
+        (KeyCode::Up, KeyModifiers::NONE) => app.move_selection(-1),
+        (KeyCode::Down, KeyModifiers::NONE) => app.move_selection(1),
+        (KeyCode::Home, KeyModifiers::NONE) => app.selected = 0,
+        (KeyCode::End, KeyModifiers::NONE) => app.selected = app.selectable.len().saturating_sub(1),
+        _ if key_matches(key, 'k') => app.move_selection(-1),
+        _ if key_matches(key, 'j') => app.move_selection(1),
+        _ => return false,
+    }
+    true
+}
+
+fn handle_jump_key(app: &mut App, key: &KeyEvent) {
+    let Some(mut menu) = app.jump_menu.take() else {
+        return;
+    };
+    let targets = app.filtered_jump_targets(&menu.query);
+    match key.code {
+        KeyCode::Esc => return,
+        KeyCode::Enter => {
+            if let Some(target) = targets.get(menu.selected) {
+                app.selected = target.task_index;
+                return;
+            }
+        }
+        KeyCode::Up | KeyCode::BackTab => {
+            menu.selected = bounded_selection(menu.selected, targets.len(), -1)
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            menu.selected = bounded_selection(menu.selected, targets.len(), 1)
+        }
+        KeyCode::Backspace => {
+            menu.query.pop();
+            menu.selected = 0;
+        }
+        KeyCode::Char(c) if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            menu.query.push(c);
+            menu.selected = 0;
+        }
+        _ => {}
+    }
+    app.jump_menu = Some(menu);
 }
 
 fn handle_confirmation_key(
@@ -714,7 +869,7 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
 
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([Constraint::Min(0), Constraint::Length(2)])
         .split(area);
 
     let body_chunks = Layout::default()
@@ -728,6 +883,8 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
 
     if let Some(confirm) = &app.confirmation {
         draw_confirmation(frame, app, confirm, area);
+    } else if let Some(menu) = &app.jump_menu {
+        draw_jump_menu(frame, app, menu, area);
     } else if let Some(toast) = &app.toast {
         draw_toast(frame, app, toast, area);
     }
@@ -1133,14 +1290,81 @@ fn draw_detail_pane(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 
 fn draw_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let separator = app.theme.help_separator.as_str();
-    let help = format!(
-        "↑/k ↓/j navigate {separator} o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
-    );
+    let help = Text::from(vec![
+        Line::from(format!(
+            "↑↓/jk task {separator} ⌥↑↓ section {separator} ⌘↑↓ project {separator} g jump {separator} Home/End"
+        )),
+        Line::from(format!(
+            "o open {separator} c complete {separator} d delete {separator} r refresh {separator} q quit"
+        )),
+    ]);
     let help_widget = Paragraph::new(help)
         .style(Style::default().fg(app.theme.status))
         .alignment(Alignment::Left);
 
     frame.render_widget(help_widget, area);
+}
+
+fn draw_jump_menu(frame: &mut ratatui::Frame, app: &App, menu: &JumpMenu, area: Rect) {
+    let popup = centered_rect(
+        area.width.saturating_sub(4).min(76),
+        area.height.saturating_sub(2).min(20),
+        area,
+    );
+    frame.render_widget(ClearWidget, popup);
+    let block = Block::default()
+        .title("Jump to project / section")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.list_border));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new(format!("Search: {}", menu.query))
+            .style(Style::default().fg(app.theme.task)),
+        chunks[0],
+    );
+    let targets = app.filtered_jump_targets(&menu.query);
+    if targets.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No matching groups").style(Style::default().fg(app.theme.description)),
+            chunks[1],
+        );
+    } else {
+        let items: Vec<ListItem> = targets
+            .iter()
+            .map(|target| {
+                let (icon, color) = if target.project {
+                    (&app.theme.project_icon, app.theme.project)
+                } else {
+                    (&app.theme.section_icon, app.theme.section)
+                };
+                let label = format!("{icon}{}", target.label);
+                ListItem::new(truncate_display_width(&label, chunks[1].width as usize))
+                    .style(Style::default().fg(color))
+            })
+            .collect();
+        let list = List::new(items).highlight_style(
+            Style::default()
+                .bg(app.theme.selected_bg)
+                .fg(app.theme.selected_fg)
+                .add_modifier(Modifier::BOLD),
+        );
+        let mut state = ratatui::widgets::ListState::default().with_selected(Some(menu.selected));
+        frame.render_stateful_widget(list, chunks[1], &mut state);
+    }
+    frame.render_widget(
+        Paragraph::new("Type to filter · ↑↓ select · Enter jump · Esc cancel")
+            .style(Style::default().fg(app.theme.status)),
+        chunks[2],
+    );
 }
 
 fn draw_toast(frame: &mut ratatui::Frame, app: &App, toast: &Toast, area: Rect) {
@@ -1548,6 +1772,207 @@ fn format_age(dur: chrono::TimeDelta) -> String {
 mod tests {
     use super::*;
     use chrono::TimeDelta;
+
+    fn navigation_app() -> App {
+        let projects = vec![
+            Project {
+                id: "a".into(),
+                name: "Alpha".into(),
+            },
+            Project {
+                id: "b".into(),
+                name: "Работа".into(),
+            },
+        ];
+        let sections = vec![
+            Section {
+                id: "one".into(),
+                name: "One".into(),
+                order: 1,
+            },
+            Section {
+                id: "two".into(),
+                name: "Two".into(),
+                order: 2,
+            },
+        ];
+        let tasks = [
+            ("a", None),
+            ("a", None),
+            ("a", Some("one")),
+            ("a", Some("one")),
+            ("a", Some("two")),
+            ("b", Some("one")),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (project, section))| {
+            let mut task = test_task(&i.to_string(), "");
+            task.project_id = project.into();
+            task.section_id = section.map(str::to_string);
+            task.order = i as i64;
+            task
+        })
+        .collect();
+        App::new(
+            reqwest::Client::new(),
+            String::new(),
+            TaskFilter::default(),
+            projects,
+            sections,
+            tasks,
+            theme::get("classic").unwrap(),
+        )
+    }
+
+    #[test]
+    fn modified_arrows_follow_the_macos_group_hierarchy() {
+        let mut app = navigation_app();
+        for (code, modifiers, expected) in [
+            (KeyCode::Down, KeyModifiers::NONE, "1"),
+            (KeyCode::Down, KeyModifiers::ALT, "2"),
+            (KeyCode::Down, KeyModifiers::ALT, "4"),
+            (KeyCode::Down, KeyModifiers::SUPER, "5"),
+            (KeyCode::Up, KeyModifiers::SUPER, "0"),
+            (KeyCode::Down, KeyModifiers::ALT, "2"),
+            (KeyCode::Up, KeyModifiers::ALT, "0"),
+            (KeyCode::End, KeyModifiers::NONE, "5"),
+            (KeyCode::Home, KeyModifiers::NONE, "0"),
+        ] {
+            assert!(handle_navigation_key(
+                &mut app,
+                &KeyEvent::new(code, modifiers)
+            ));
+            assert_eq!(app.selected_task().unwrap().task.id, expected);
+        }
+        for (code, modifiers) in [
+            (KeyCode::Down, KeyModifiers::CONTROL),
+            (KeyCode::Down, KeyModifiers::ALT | KeyModifiers::SUPER),
+            (KeyCode::Right, KeyModifiers::NONE),
+            (KeyCode::Tab, KeyModifiers::NONE),
+        ] {
+            assert!(!handle_navigation_key(
+                &mut app,
+                &KeyEvent::new(code, modifiers)
+            ));
+            assert_eq!(app.selected, 0);
+        }
+    }
+
+    #[test]
+    fn group_jumps_skip_tasks_and_stop_at_boundaries() {
+        let mut app = navigation_app();
+        app.selected = 1;
+        app.jump_group(false, true);
+        assert_eq!(app.selected_task().unwrap().task.id, "2");
+        app.jump_group(false, true);
+        assert_eq!(app.selected_task().unwrap().task.id, "4");
+        app.jump_group(false, true);
+        assert_eq!(app.selected_task().unwrap().task.id, "5");
+        app.jump_group(false, true);
+        assert_eq!(app.selected, 5);
+        app.jump_group(false, false);
+        assert_eq!(app.selected, 4);
+        app.jump_group(true, false);
+        assert_eq!(app.selected, 4); // First project: no wrapping or cursor reset.
+        app.jump_group(true, true);
+        assert_eq!(app.selected, 5);
+        app.jump_group(true, false);
+        assert_eq!(app.selected, 0);
+        app.jump_group(false, false);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn jump_menu_filters_paths_and_keeps_cancel_and_empty_results_safe() {
+        let mut app = navigation_app();
+        app.selected = 3;
+        app.open_jump_menu();
+        let menu = app.jump_menu.as_ref().unwrap();
+        assert_eq!(
+            app.filtered_jump_targets(&menu.query)[menu.selected].label,
+            "Alpha / One"
+        );
+        for c in "РАБОТА / ONE".chars() {
+            handle_jump_key(
+                &mut app,
+                &KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+            );
+        }
+        handle_jump_key(&mut app, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.jump_menu.is_none());
+        assert_eq!(app.selected_task().unwrap().task.id, "5");
+        app.open_jump_menu();
+        for c in "qcd".chars() {
+            handle_jump_key(
+                &mut app,
+                &KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+            );
+        }
+        handle_jump_key(&mut app, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.jump_menu.is_some());
+        assert!(app.confirmation.is_none());
+        assert_eq!(app.selected, 5);
+        handle_jump_key(
+            &mut app,
+            &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
+        assert_eq!(app.jump_menu.as_ref().unwrap().query, "qc");
+        handle_jump_key(&mut app, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.jump_menu.is_none());
+        assert_eq!(app.selected, 5);
+        app.open_jump_menu();
+        assert!(app.jump_menu.as_ref().unwrap().query.is_empty());
+        assert_eq!(app.filtered_jump_targets("one").len(), 2); // Repeated names have distinct project paths.
+        assert_eq!(app.filtered_jump_targets("no section")[0].task_index, 0);
+        assert!(key_matches(
+            &KeyEvent::new(KeyCode::Char('п'), KeyModifiers::NONE),
+            'g'
+        ));
+    }
+
+    #[test]
+    fn jump_menu_renders_in_all_themes_and_empty_or_small_views() {
+        let mut app = navigation_app();
+        for name in ["classic", "forest", "sunset", "ocean", "midnight"] {
+            app.theme = theme::get(name).unwrap();
+            app.open_jump_menu();
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(rendered.contains("Jump to project / section"));
+            assert!(rendered.contains("Alpha / No section"));
+            assert!(rendered.contains("Работа / One"));
+        }
+        app.set_tasks(Vec::new());
+        app.jump_group(false, true);
+        app.jump_group(true, false);
+        app.open_jump_menu();
+        handle_jump_key(&mut app, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        handle_jump_key(&mut app, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.selected_task().is_none());
+        for (width, height) in [(80, 24), (20, 5), (1, 1)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+            if width == 80 {
+                let rendered: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(rendered.contains("No matching groups"));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn fetches_every_page_with_the_returned_cursor() {
