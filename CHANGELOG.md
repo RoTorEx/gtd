@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-10-13
+
 ### Fixed
 
 - Keep completed task markers aligned with active rows so timing and title
