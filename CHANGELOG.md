@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-10-13
+
 ### Added
 
 - Animated request progress for completion, undo, deletion, and refresh, with
