@@ -44,6 +44,10 @@ to the Todoist application.
   Todoist API requests, and is never persisted or printed.
 - Read-only display actions do not mutate Todoist data.
 - Completing, undoing a completion, and deleting tasks are the only Todoist mutations.
+- Completed task markers preserve the active row's indentation and column widths.
+  Their titles, descriptions, and timing labels (creation age or Today due label)
+  are gray and struck through, including while selected. Undo restores normal
+  styles without shifting columns.
 - Completion feedback is session-only and survives refresh, filters, and other
   mutations. Keep the original completed occurrence for recurring tasks rather
   than showing its next occurrence in this session; the next launch fetches the

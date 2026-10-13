@@ -4,6 +4,13 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep completed task markers aligned with active rows so timing and title
+  columns do not shift when completing or undoing a task.
+- Gray and strike through completed timing labels along with the title and
+  description, including selected rows and the Today view.
+
 ## [0.2.14] - 2026-10-13
 
 ### Added

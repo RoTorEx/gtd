@@ -8,7 +8,7 @@ use crossterm::terminal::{
 };
 use crossterm::{ExecutableCommand, cursor};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear as ClearWidget, List, ListItem, Paragraph, Wrap};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -1080,29 +1080,44 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
 
                     let completed = app.is_completed(&item.task.id);
                     let modifier = if completed {
-                        Modifier::CROSSED_OUT | Modifier::DIM
+                        Modifier::CROSSED_OUT
                     } else {
                         Modifier::empty()
                     };
+                    let completed_style =
+                        Style::default().fg(Color::DarkGray).add_modifier(modifier);
                     Line::from(vec![
                         Span::styled(
                             if completed {
-                                "✓ "
+                                theme.task_icon.replacen(theme.task_icon.trim(), "✓", 1)
                             } else {
-                                theme.task_icon.as_str()
+                                theme.task_icon.clone()
                             },
                             Style::default().fg(theme.section),
                         ),
-                        Span::styled(format!("{age_padded}  "), Style::default().fg(age_color)),
+                        Span::styled(
+                            format!("{age_padded}  "),
+                            if completed {
+                                completed_style
+                            } else {
+                                Style::default().fg(age_color)
+                            },
+                        ),
                         Span::styled(
                             content,
-                            Style::default().fg(theme.task).add_modifier(modifier),
+                            if completed {
+                                completed_style
+                            } else {
+                                Style::default().fg(theme.task)
+                            },
                         ),
                         Span::styled(
                             desc_part,
-                            Style::default()
-                                .fg(theme.description)
-                                .add_modifier(modifier),
+                            if completed {
+                                completed_style
+                            } else {
+                                Style::default().fg(theme.description)
+                            },
                         ),
                     ])
                 }
@@ -1112,14 +1127,18 @@ fn draw_task_list(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
+    let selected_completed = app
+        .selected_task()
+        .is_some_and(|item| app.is_completed(&item.task.id));
+    let mut highlight_style = Style::default()
+        .bg(theme.selected_bg)
+        .add_modifier(Modifier::BOLD);
+    if !selected_completed {
+        highlight_style = highlight_style.fg(theme.selected_fg);
+    }
     let list = List::new(items)
         .highlight_symbol("")
-        .highlight_style(
-            Style::default()
-                .bg(theme.selected_bg)
-                .fg(theme.selected_fg)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(highlight_style)
         .scroll_padding(3);
 
     let mut list_state = ratatui::widgets::ListState::default()
@@ -2202,6 +2221,91 @@ mod tests {
         app.forget_completion(&task.id);
         app.set_tasks(vec![task]);
         assert!(app.selectable.is_empty());
+    }
+
+    #[test]
+    fn completion_keeps_columns_and_grays_timing_even_when_selected() {
+        for name in ["classic", "forest", "sunset", "ocean", "midnight"] {
+            for today in [false, true] {
+                let mut app = navigation_app();
+                app.theme = theme::get(name).unwrap();
+                let mut task = app.selected_task().unwrap().task.clone();
+                task.content = "Finished task".into();
+                task.due = Some(due(&Local::now().date_naive().to_string(), None));
+                app.filter.today = today;
+                app.set_tasks(vec![task.clone()]);
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(100, 12)).unwrap();
+                terminal
+                    .draw(|frame| draw_task_list(frame, &mut app, frame.area()))
+                    .unwrap();
+                let before = terminal.backend().buffer().clone();
+                let title_position = before
+                    .content
+                    .iter()
+                    .position(|cell| cell.symbol() == "F")
+                    .unwrap();
+                let row_start = title_position / 100 * 100;
+                let timing_position = before.content[row_start..title_position]
+                    .iter()
+                    .position(|cell| {
+                        if today {
+                            cell.symbol() == "T"
+                        } else {
+                            cell.symbol().chars().any(|c| c.is_ascii_digit())
+                        }
+                    })
+                    .unwrap()
+                    + row_start;
+                app.remember_completion(&task.id);
+                app.set_tasks(Vec::new());
+                for selected in [true, false] {
+                    if !selected {
+                        let mut other = task.clone();
+                        other.id = "other".into();
+                        other.content = "Active task".into();
+                        other.order += 1;
+                        app.set_tasks(vec![other]);
+                        app.selected = 1;
+                    }
+                    terminal
+                        .draw(|frame| draw_task_list(frame, &mut app, frame.area()))
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let after_title = buffer
+                        .content
+                        .iter()
+                        .position(|cell| cell.symbol() == "F")
+                        .unwrap();
+                    assert_eq!(
+                        after_title, title_position,
+                        "{name}, today={today}, selected={selected}"
+                    );
+                    assert_eq!(
+                        buffer.content[timing_position].symbol(),
+                        before.content[timing_position].symbol()
+                    );
+                    for index in [timing_position, title_position] {
+                        assert_eq!(buffer.content[index].fg, Color::DarkGray);
+                        assert!(
+                            buffer.content[index]
+                                .modifier
+                                .contains(Modifier::CROSSED_OUT)
+                        );
+                    }
+                }
+                app.forget_completion(&task.id);
+                app.selected = 0;
+                terminal
+                    .draw(|frame| draw_task_list(frame, &mut app, frame.area()))
+                    .unwrap();
+                assert!(
+                    !terminal.backend().buffer().content[timing_position]
+                        .modifier
+                        .contains(Modifier::CROSSED_OUT)
+                );
+            }
+        }
     }
 
     #[test]
