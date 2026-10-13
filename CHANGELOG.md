@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-10-13
+
 ### Changed
 
 - Use left/right to jump between sections and Shift+left/right for projects,
