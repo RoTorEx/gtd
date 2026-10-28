@@ -2,9 +2,9 @@
 
 PROJECT_NAME := $(notdir $(CURDIR))
 BIN_NAME := $(PROJECT_NAME)
-X_CLI_HOME := $(HOME)/.x-cli-$(PROJECT_NAME)
+X_CLI_HOME := $(HOME)/.toolbelt/$(PROJECT_NAME)
 X_CLI_BIN_DIR := $(X_CLI_HOME)/bin
-GTD_CONFIG_DIR := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/gtd
+GTD_CONFIG_DIR := $(HOME)/.toolbelt/gtd
 GTD_CONFIG_FILE := $(GTD_CONFIG_DIR)/config.toml
 CONSTRUCTION_SIDE := $(HOME)/construction_side
 CARGO_TARGET_DIR := $(CONSTRUCTION_SIDE)/$(PROJECT_NAME)/target
@@ -50,6 +50,10 @@ setup-path:
 		echo '  export PATH="$(X_CLI_BIN_DIR):$$PATH"'; \
 		exit 0; \
 	fi; \
+	while [ -L "$$profile" ]; do \
+		target="$$(readlink "$$profile")"; \
+		case "$$target" in /*) profile="$$target" ;; *) profile="$$(dirname "$$profile")/$$target" ;; esac; \
+	done; \
 	block_start="# x-cli-$(PROJECT_NAME)"; \
 	block_end="# /x-cli-$(PROJECT_NAME)"; \
 	if grep -qF "$$block_start" "$$profile" 2>/dev/null; then \

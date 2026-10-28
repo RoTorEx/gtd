@@ -11,10 +11,10 @@ put it somewhere on your `PATH`. Other platforms can build from source.
 
 To build from source, install a current stable Rust toolchain, clone this
 repository, and run `make install`. The binary is installed at
-`~/.x-cli-gtd/bin/gtd`, and the installer adds that directory to your shell
+`~/.toolbelt/gtd/bin/gtd`, and the installer adds that directory to your shell
 profile's `PATH`.
 
-The installer also creates `~/.config/gtd/config.toml` when it does not exist
+The installer also creates `~/.toolbelt/gtd/config.toml` when it does not exist
 (or `$XDG_CONFIG_HOME/gtd/config.toml` when that variable is set). Existing
 configuration is preserved on later installs.
 
@@ -114,7 +114,7 @@ gtd themes
 gtd theme ocean
 ```
 
-The active theme is stored in `~/.config/gtd/config.toml`:
+The active theme is stored in `~/.toolbelt/gtd/config.toml`:
 
 ```toml
 theme = "classic"

@@ -240,7 +240,7 @@ fn config_path() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(root).join("gtd/config.toml"));
     }
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/gtd/config.toml"))
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".toolbelt/gtd/config.toml"))
 }
 
 fn parse_color(name: &str) -> Result<Color> {

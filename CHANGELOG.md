@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+- Toolbelt migration: use `~/.toolbelt/<name>` for custom installations and update project-path references where applicable.
+
 ## [0.2.15] - 2026-10-13
 
 ### Fixed
