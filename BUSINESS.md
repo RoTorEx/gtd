@@ -151,3 +151,10 @@ to the Todoist application.
   symbol definitions.
 - `Makefile` — stable build, verification, installation, and release commands.
 - `.github/workflows/release.yml` — tagged release artifact publication.
+
+## Local product usage evidence
+
+Record meaningful workflow outcomes locally, with bounded storage and no source
+content. [Usage logging](docs/usage-logging.md) owns the event and retention
+contract. Successful API calls, prepared artifacts and user-reported outcomes
+must not be presented as broader business success.

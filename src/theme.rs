@@ -233,7 +233,7 @@ fn write_config(path: &Path, contents: &str) -> Result<()> {
     result
 }
 
-fn config_path() -> Option<PathBuf> {
+pub(crate) fn config_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("GTD_CONFIG").filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
     }

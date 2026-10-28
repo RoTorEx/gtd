@@ -173,3 +173,8 @@ See `Makefile`.
 ## License
 
 [MIT](LICENSE)
+
+## Local usage logs
+
+See [usage logging](docs/usage-logging.md) for product events, privacy, paths,
+rotation and interpretation limits.

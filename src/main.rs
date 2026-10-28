@@ -18,6 +18,8 @@ use std::io::{self, stdout};
 use std::time::{Duration, Instant};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+mod usage;
+use serde_json::json;
 mod theme;
 mod update;
 
@@ -252,6 +254,7 @@ struct JumpMenu {
 }
 
 struct PendingRequest {
+    operation: usage::Operation,
     action: ConfirmAction,
     handle: tokio::task::JoinHandle<Result<Option<Vec<Task>>>>,
     started_at: Instant,
@@ -570,7 +573,31 @@ fn bounded_selection(current: usize, len: usize, delta: isize) -> usize {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    if let Some(path) = theme::config_path() {
+        usage::init("gtd", path.with_file_name("logs").join("events.jsonl"));
+    }
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(error) => {
+            usage::event(
+                "cli_parse",
+                if error.use_stderr() { "error" } else { "no_op" },
+                json!({}),
+            );
+            error.exit()
+        }
+    };
+    let operation = usage::Operation::start("command");
+    let result = run(args).await;
+    operation.finish(if result.is_ok() { "success" } else { "error" }, json!({}));
+    result
+}
+async fn run(args: Args) -> Result<()> {
+    usage::event(
+        "command_selected",
+        "started",
+        json!({"mode":match &args.command {Some(Command::Update)=>"update",Some(Command::Theme {..})=>"theme",Some(Command::Themes)=>"themes",None if args.plain=>"plain",None=>"tui"},"today":args.today,"project_filter":args.project.is_some()}),
+    );
 
     match &args.command {
         Some(Command::Update) => return update::run().await,
@@ -607,6 +634,11 @@ async fn main() -> Result<()> {
         project: args.project,
         today: args.today,
     };
+    usage::event(
+        "review_loaded",
+        "success",
+        json!({"fetched_tasks":tasks.len(),"projects":projects.len(),"sections":sections.len()}),
+    );
     if args.plain {
         print_plain_list(&projects, &sections, &tasks, &filter)
     } else {
@@ -642,6 +674,11 @@ async fn run_interactive(
         theme,
     );
 
+    usage::event(
+        "review_ready",
+        "success",
+        json!({"visible_tasks":app.selectable.len()}),
+    );
     enable_raw_mode()?;
     let guard = AltScreenGuard;
     let mut stdout = stdout();
@@ -733,6 +770,18 @@ fn run_tui(app: &mut App) -> Result<()> {
             }
 
             if is_quit_key(&key) {
+                if let Some(confirm) = app.confirmation.take() {
+                    usage::event(
+                        action_name(&confirm.action),
+                        "canceled",
+                        json!({"stage":"confirmation"}),
+                    );
+                }
+                if let Some(pending) = app.pending.take() {
+                    pending
+                        .operation
+                        .finish("unknown", json!({"reason":"exit_while_pending"}));
+                }
                 break;
             }
 
@@ -797,8 +846,22 @@ fn run_tui(app: &mut App) -> Result<()> {
                     if let Some(url) = app.selected_task().map(|item| task_browser_url(&item.task))
                     {
                         match open::that(&url) {
-                            Ok(()) => app.show_info("Opened in browser"),
-                            Err(e) => app.show_error(format!("Failed to open: {e}")),
+                            Ok(()) => {
+                                usage::event(
+                                    "task_open",
+                                    "success",
+                                    json!({"stage":"browser_request_accepted"}),
+                                );
+                                app.show_info("Opened in browser");
+                            }
+                            Err(e) => {
+                                usage::event(
+                                    "task_open",
+                                    "error",
+                                    json!({"error_code":"browser_request_failed"}),
+                                );
+                                app.show_error(format!("Failed to open: {e}"));
+                            }
                         }
                     }
                 }
@@ -873,11 +936,24 @@ fn handle_confirmation_key(
     if key_matches(key, 'y') {
         start_request(app, rt, confirm.action);
     } else {
+        usage::event(
+            action_name(&confirm.action),
+            "canceled",
+            json!({"stage":"confirmation"}),
+        );
         app.show_info("Cancelled");
     }
     Ok(())
 }
 
+fn action_name(action: &ConfirmAction) -> &'static str {
+    match action {
+        ConfirmAction::Complete(_) => "task_complete",
+        ConfirmAction::Reopen(_) => "task_reopen",
+        ConfirmAction::Delete(_) => "task_delete",
+        ConfirmAction::Refresh => "refresh",
+    }
+}
 fn start_request(app: &mut App, rt: &tokio::runtime::Runtime, action: ConfirmAction) {
     if app.pending.is_some() {
         return;
@@ -910,6 +986,7 @@ fn start_request(app: &mut App, rt: &tokio::runtime::Runtime, action: ConfirmAct
         Ok(None)
     });
     app.pending = Some(PendingRequest {
+        operation: usage::Operation::start(action_name(&action)),
         action,
         handle,
         started_at: Instant::now(),
@@ -932,6 +1009,10 @@ fn finish_pending_request(app: &mut App, rt: &tokio::runtime::Runtime) {
     {
         Ok(Some(tasks)) => {
             app.set_tasks(tasks);
+            pending.operation.finish(
+                "success",
+                json!({"visible_tasks":app.selectable.len(),"stage":"ui_applied"}),
+            );
             let message = app
                 .toast
                 .as_ref()
@@ -967,9 +1048,17 @@ fn finish_pending_request(app: &mut App, rt: &tokio::runtime::Runtime) {
                 }
                 ConfirmAction::Refresh => {}
             }
+            pending
+                .operation
+                .finish("success", json!({"stage":"ui_applied"}));
             start_request(app, rt, ConfirmAction::Refresh);
         }
-        Err(error) => app.show_error(format!("{label} failed: {error}")),
+        Err(error) => {
+            pending
+                .operation
+                .finish("error", json!({"error_code":"request_failed"}));
+            app.show_error(format!("{label} failed: {error}"));
+        }
     }
 }
 
