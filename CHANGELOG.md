@@ -1,12 +1,10 @@
 # Project Changelog
 
-## Unreleased
-
-- Add bounded, metadata-only local product usage evidence; preserve business and recovery state.
-
 Tracks real product and release progress.
 
 ## [Unreleased]
+
+- Add bounded, metadata-only local product usage evidence; preserve business and recovery state.
 
 ## [0.2.16] - 2026-10-28
 
