@@ -178,3 +178,7 @@ See `Makefile`.
 
 See [usage logging](docs/usage-logging.md) for product events, privacy, paths,
 rotation and interpretation limits.
+
+## Continuous integration
+
+This repository stays public. Pushes, pull requests and manual checks run `make check` and `make build` on GitHub-hosted Ubuntu without Todoist credentials or live task changes. Tagged Apple Silicon release builds remain on GitHub macOS; no personal VPS runner is used.

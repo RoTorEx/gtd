@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+- Add GitHub-hosted Linux formatting, lint, test and build checks while preserving public access and macOS releases.
+
 ## [0.2.17] - 2026-10-31
 
 - Add bounded, metadata-only local product usage evidence; preserve business and recovery state.
