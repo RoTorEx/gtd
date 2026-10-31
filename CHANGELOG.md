@@ -4,6 +4,8 @@ Tracks real product and release progress.
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-10-31
+
 - Add bounded, metadata-only local product usage evidence; preserve business and recovery state.
 
 ## [0.2.16] - 2026-10-28
